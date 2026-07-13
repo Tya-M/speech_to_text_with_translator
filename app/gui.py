@@ -29,10 +29,7 @@ from utils.threading_utils import (
     RecognitionResult, StoppableThread
 )
 from audio.capture import AudioCapture, AudioDevice
-from recognition import (
-    VoskRecognizer,
-    VOSK_AVAILABLE
-)
+from recognition import create_recognizer
 from translation import Translator, ARGOS_AVAILABLE
 
 logger = logging.getLogger("voice_translator.app.gui")
@@ -64,6 +61,15 @@ class VoiceTranslatorApp:
 
     TITLE = "Голосовой Переводчик"
     VERSION = "1.0.0"
+    ENGINE_LABELS = {"Vosk": "vosk", "Whisper": "whisper"}
+    ENGINE_VALUES = list(ENGINE_LABELS.keys())
+    WHISPER_BACKEND_LABELS = {
+        "whisper.cpp (GPU)": "whisper_cpp",
+        "faster-whisper (CPU)": "faster",
+        "openai (CPU)": "openai",
+    }
+    WHISPER_BACKEND_VALUES = list(WHISPER_BACKEND_LABELS.keys())
+    WHISPER_MODEL_VALUES = ["tiny", "base", "small", "medium", "large-v3"]
 
     def __init__(self, config: AppConfig):
         self.config = config
@@ -76,7 +82,6 @@ class VoiceTranslatorApp:
 
         # Компоненты
         self.audio_capture: Optional[AudioCapture] = None
-        self.vosk_recognizer: Optional[VoskRecognizer] = None
         self.translator: Optional[Translator] = None
         self.current_recognizer = None
 
@@ -88,6 +93,9 @@ class VoiceTranslatorApp:
         self.text_area: Optional[tk.Text] = None
         self.level_meter: Optional[LevelMeter] = None
         self.record_button: Optional[RecordButton] = None
+        self.engine_menu: Optional[ctk.CTkOptionMenu] = None
+        self.backend_menu: Optional[ctk.CTkOptionMenu] = None
+        self.whisper_model_menu: Optional[ctk.CTkOptionMenu] = None
         self.model_toggle: Optional[ctk.CTkSegmentedButton] = None
         self.status_bar: Optional[StatusBar] = None
         self.device_menu: Optional[ctk.CTkOptionMenu] = None
@@ -160,18 +168,76 @@ class VoiceTranslatorApp:
         top_controls = ctk.CTkFrame(control_panel, corner_radius=0, fg_color="transparent")
         top_controls.pack(fill="x", padx=SPACING.sm, pady=(SPACING.xs, 2))
 
-        # Выбор модели Vosk
+        # Выбор движка
         engine_frame = ctk.CTkFrame(top_controls, corner_radius=0, fg_color="transparent")
-        engine_frame.pack(side="left")
+        engine_frame.pack(side="left", padx=(0, SPACING.sm))
 
         ctk.CTkLabel(
-            engine_frame, text="Модель Vosk:",
+            engine_frame, text="Движок:",
+            font=get_font_tuple(FONTS.size_small),
+            text_color=COLORS.text_secondary
+        ).pack(anchor="w")
+
+        self.engine_menu = ctk.CTkOptionMenu(
+            engine_frame,
+            values=self.ENGINE_VALUES,
+            command=self._on_engine_change,
+            width=96,
+            font=get_font_tuple(FONTS.size_small)
+        )
+        self.engine_menu.set(self._engine_label_from_config())
+        self.engine_menu.pack(anchor="w", pady=(2, 0))
+
+        backend_frame = ctk.CTkFrame(top_controls, corner_radius=0, fg_color="transparent")
+        backend_frame.pack(side="left", padx=(0, SPACING.sm))
+
+        ctk.CTkLabel(
+            backend_frame, text="Backend:",
+            font=get_font_tuple(FONTS.size_small),
+            text_color=COLORS.text_secondary
+        ).pack(anchor="w")
+
+        self.backend_menu = ctk.CTkOptionMenu(
+            backend_frame,
+            values=self.WHISPER_BACKEND_VALUES,
+            command=self._on_backend_change,
+            width=168,
+            font=get_font_tuple(FONTS.size_small)
+        )
+        self.backend_menu.set(self._backend_label_from_config())
+        self.backend_menu.pack(anchor="w", pady=(2, 0))
+
+        whisper_model_frame = ctk.CTkFrame(top_controls, corner_radius=0, fg_color="transparent")
+        whisper_model_frame.pack(side="left", padx=(0, SPACING.sm))
+
+        ctk.CTkLabel(
+            whisper_model_frame, text="Whisper:",
+            font=get_font_tuple(FONTS.size_small),
+            text_color=COLORS.text_secondary
+        ).pack(anchor="w")
+
+        self.whisper_model_menu = ctk.CTkOptionMenu(
+            whisper_model_frame,
+            values=self.WHISPER_MODEL_VALUES,
+            command=self._on_whisper_model_change,
+            width=96,
+            font=get_font_tuple(FONTS.size_small)
+        )
+        self.whisper_model_menu.set(self._whisper_model_from_config())
+        self.whisper_model_menu.pack(anchor="w", pady=(2, 0))
+
+        # Выбор модели Vosk
+        vosk_model_frame = ctk.CTkFrame(top_controls, corner_radius=0, fg_color="transparent")
+        vosk_model_frame.pack(side="left")
+
+        ctk.CTkLabel(
+            vosk_model_frame, text="Модель Vosk:",
             font=get_font_tuple(FONTS.size_small),
             text_color=COLORS.text_secondary
         ).pack(anchor="w")
 
         self.model_toggle = ctk.CTkSegmentedButton(
-            engine_frame,
+            vosk_model_frame,
             values=["Быстрая (0.42)", "Точная (0.22)"],
             command=self._on_model_change,
             font=get_font_tuple(FONTS.size_small),
@@ -184,6 +250,7 @@ class VoiceTranslatorApp:
         initial_model = "Точная (0.22)" if self.config.vosk_model_size == "large" else "Быстрая (0.42)"
         self.model_toggle.set(initial_model)
         self.model_toggle.pack(anchor="w", pady=(2, 0))
+        self._sync_engine_controls()
 
         # Выбор устройства (CTkOptionMenu)
         device_frame = ctk.CTkFrame(top_controls, corner_radius=0, fg_color="transparent")
@@ -492,26 +559,16 @@ class VoiceTranslatorApp:
             self.root.after(0, lambda: self._show_error("Ошибка", f"Микрофон: {e}"))
             return
 
-        # Vosk
-        if VOSK_AVAILABLE:
-            try:
-                rec_config = RecognitionConfig.from_app_config(self.config)
-                # Выбираем путь к модели в зависимости от размера
-                model_path = self.config.vosk_model_path
-                if self.config.vosk_model_size == "large":
-                    model_path = self.config.vosk_large_model_path
-
-                self.vosk_recognizer = VoskRecognizer(
-                    rec_config, model_path,
-                    phrase_timeout=self.config.vosk_phrase_timeout
-                )
-                if self.vosk_recognizer.load():
-                    logger.info(f"Vosk загружен (модель: {self.config.vosk_model_size})")
-                else:
-                    self.vosk_recognizer = None
-            except Exception as e:
-                logger.error(f"Ошибка загрузки Vosk: {e}")
-                self.vosk_recognizer = None
+        # Распознаватель
+        try:
+            self.current_recognizer = self._load_configured_recognizer()
+            if self.current_recognizer:
+                logger.info("Распознаватель загружен: %s", self._recognizer_engine_status(self.current_recognizer))
+            else:
+                logger.error("Не удалось загрузить распознаватель")
+        except Exception as e:
+            logger.error(f"Ошибка загрузки распознавателя: {e}")
+            self.current_recognizer = None
 
         # Переводчик
         if ARGOS_AVAILABLE:
@@ -525,11 +582,7 @@ class VoiceTranslatorApp:
                 logger.error(f"Ошибка загрузки переводчика: {e}")
                 self.translator = None
 
-        # Устанавливаем текущий движок (только Vosk)
-        if self.vosk_recognizer:
-            self.current_recognizer = self.vosk_recognizer
-
-        self.engine_manager.state = EngineState.READY
+        self.engine_manager.state = EngineState.READY if self.current_recognizer else EngineState.ERROR
         self.root.after(0, self._update_status)
         logger.info("Инициализация завершена")
 
@@ -562,15 +615,81 @@ class VoiceTranslatorApp:
                 self.config.device_name = device.name
                 logger.info(f"Восстановлено устройство: {device.name}")
 
+    def _engine_label_from_config(self) -> str:
+        return "Whisper" if self.config.engine == "whisper" else "Vosk"
+
+    def _backend_label_from_config(self) -> str:
+        for label, backend in self.WHISPER_BACKEND_LABELS.items():
+            if backend == self.config.whisper_backend:
+                return label
+        return "whisper.cpp (GPU)"
+
+    def _whisper_model_from_config(self) -> str:
+        if self.config.whisper_model in self.WHISPER_MODEL_VALUES:
+            return self.config.whisper_model
+        return "small"
+
+    def _sync_engine_controls(self):
+        """Keeps selector states aligned with the selected engine."""
+        if not self.engine_menu:
+            return
+
+        is_whisper = self.config.engine == "whisper"
+        self.engine_menu.set(self._engine_label_from_config())
+        if self.backend_menu:
+            self.backend_menu.set(self._backend_label_from_config())
+            self.backend_menu.configure(state="normal" if is_whisper else "disabled")
+        if self.whisper_model_menu:
+            self.whisper_model_menu.set(self._whisper_model_from_config())
+            self.whisper_model_menu.configure(state="normal" if is_whisper else "disabled")
+        if self.model_toggle:
+            model = "Точная (0.22)" if self.config.vosk_model_size == "large" else "Быстрая (0.42)"
+            self.model_toggle.set(model)
+            self.model_toggle.configure(state="disabled" if is_whisper else "normal")
+
+    def _load_configured_recognizer(self):
+        """Loads the configured recognizer through the shared factory."""
+        rec_config = RecognitionConfig.from_app_config(self.config)
+        return create_recognizer(self.config, rec_config)
+
+    def _recognizer_engine_status(self, recognizer) -> str:
+        class_name = recognizer.__class__.__name__
+        if class_name == "VoskRecognizer":
+            return "Vosk · CPU"
+        if class_name == "WhisperCppRecognizer":
+            device = "Metal (AMD RX 580)" if getattr(recognizer, "gpu_active", False) else "CPU"
+            return f"Whisper · whisper.cpp · {device}"
+        if class_name == "FasterWhisperRecognizer":
+            return "Whisper · faster-whisper · CPU"
+        if class_name == "WhisperRecognizer":
+            return "Whisper · openai · CPU"
+        return getattr(recognizer, "_model_name", recognizer.name)
+
+    def _recognizer_model_status(self, recognizer) -> str:
+        class_name = recognizer.__class__.__name__
+        if class_name == "VoskRecognizer":
+            return "Russian 0.22" if self.config.vosk_model_size == "large" else "Russian 0.42"
+        return str(getattr(recognizer, "model_name", getattr(recognizer, "_model_name", "—")))
+
+    def _recognizer_matches_config(self, recognizer) -> bool:
+        expected_by_config = {
+            ("vosk", ""): "VoskRecognizer",
+            ("whisper", "whisper_cpp"): "WhisperCppRecognizer",
+            ("whisper", "faster"): "FasterWhisperRecognizer",
+            ("whisper", "openai"): "WhisperRecognizer",
+        }
+        expected = expected_by_config.get((self.config.engine, self.config.whisper_backend if self.config.engine == "whisper" else ""))
+        return recognizer.__class__.__name__ == expected
+
     def _update_status(self):
         """Обновляет статус бар."""
+        self._sync_engine_controls()
         if self.current_recognizer:
-            engine_name = "Vosk"
-            self.status_bar.set_engine(engine_name, ready=True)
-            model_name = "Russian 0.22" if self.config.vosk_model_size == "large" else "Russian 0.42"
-            self.status_bar.set_model(model_name)
+            self.status_bar.set_engine(self._recognizer_engine_status(self.current_recognizer), ready=True)
+            self.status_bar.set_model(self._recognizer_model_status(self.current_recognizer))
         else:
             self.status_bar.set_engine("Не загружен", ready=False)
+            self.status_bar.set_model("—")
 
     def _start_polling(self):
         """Запускает polling."""
@@ -922,9 +1041,55 @@ class VoiceTranslatorApp:
         int_value = int(value)
         self.vad_label.configure(text=str(int_value))
         self.config.vad_threshold = int_value
-        if self.vosk_recognizer:
-            self.vosk_recognizer.config.vad_threshold = int_value
+        if self.current_recognizer:
+            self.current_recognizer.config.vad_threshold = int_value
         self._save_config()
+
+    def _on_engine_change(self, engine_label: str):
+        """Обработчик смены движка распознавания."""
+        if self._is_recording:
+            self._show_error("Внимание", "Остановите запись перед сменой движка")
+            self._sync_engine_controls()
+            return
+
+        new_engine = self.ENGINE_LABELS.get(engine_label, "vosk")
+        if new_engine == self.config.engine:
+            return
+
+        self.config.engine = new_engine
+        self._save_config()
+        self._sync_engine_controls()
+        self._reload_recognizer(show_messages=True)
+
+    def _on_backend_change(self, backend_label: str):
+        """Обработчик смены Whisper backend."""
+        if self._is_recording:
+            self._show_error("Внимание", "Остановите запись перед сменой backend")
+            self._sync_engine_controls()
+            return
+
+        new_backend = self.WHISPER_BACKEND_LABELS.get(backend_label, "whisper_cpp")
+        if self.config.engine != "whisper" or new_backend == self.config.whisper_backend:
+            return
+
+        self.config.whisper_backend = new_backend
+        self.config.whisper_cpp_use_gpu = new_backend == "whisper_cpp"
+        self._save_config()
+        self._reload_recognizer(show_messages=True)
+
+    def _on_whisper_model_change(self, model_name: str):
+        """Обработчик смены Whisper модели."""
+        if self._is_recording:
+            self._show_error("Внимание", "Остановите запись перед сменой модели")
+            self._sync_engine_controls()
+            return
+
+        if self.config.engine != "whisper" or model_name == self.config.whisper_model:
+            return
+
+        self.config.whisper_model = model_name
+        self._save_config()
+        self._reload_recognizer(show_messages=True)
 
     def _on_model_change(self, model_name: str):
         """Обработчик смены модели Vosk."""
@@ -961,51 +1126,72 @@ class VoiceTranslatorApp:
         self.config.vosk_model_size = new_size
         self._save_config()
 
-        # Перезагружаем Vosk с новой моделью
-        self._reload_vosk_model()
+        self._reload_recognizer(show_messages=True)
 
-    def _reload_vosk_model(self):
-        """Перезагружает Vosk с текущей моделью из config."""
-        if not VOSK_AVAILABLE:
+    def _reload_recognizer(self, show_messages: bool = False):
+        """Перезагружает текущий распознаватель без блокировки Tk main loop."""
+        if self.engine_manager.is_switching:
+            self._show_error("Внимание", "Переключение движка уже выполняется")
+            self._sync_engine_controls()
             return
 
+        requested_label = self._configured_engine_summary()
         # Показываем статус загрузки
         self.status_bar.set_engine("Загрузка...", ready=False)
         self.status_bar.set_model("...")
+        if self.recording_status:
+            self.recording_status.configure(text="Загрузка движка...", text_color=COLORS.accent_warning)
 
         def reload_in_thread():
-            # Выгружаем старую модель
-            if self.vosk_recognizer:
-                self.vosk_recognizer.unload()
-                self.vosk_recognizer = None
-                self.current_recognizer = None
-
-            # Загружаем новую модель
+            new_recognizer = None
+            error = None
             try:
-                rec_config = RecognitionConfig.from_app_config(self.config)
-                model_path = self.config.vosk_model_path
-                if self.config.vosk_model_size == "large":
-                    model_path = self.config.vosk_large_model_path
+                with self.engine_manager.switch_engine():
+                    old_recognizer = self.current_recognizer
+                    self.current_recognizer = None
+                    if old_recognizer:
+                        old_recognizer.unload()
 
-                self.vosk_recognizer = VoskRecognizer(
-                    rec_config, model_path,
-                    phrase_timeout=self.config.vosk_phrase_timeout
-                )
-                if self.vosk_recognizer.load():
-                    self.current_recognizer = self.vosk_recognizer
-                    logger.info(f"Vosk перезагружен (модель: {self.config.vosk_model_size})")
-                else:
-                    self.vosk_recognizer = None
-                    logger.error("Не удалось загрузить Vosk модель")
+                    new_recognizer = self._load_configured_recognizer()
+                    self.current_recognizer = new_recognizer
+                    self.engine_manager.state = EngineState.READY if new_recognizer else EngineState.ERROR
             except Exception as e:
-                logger.error(f"Ошибка перезагрузки Vosk: {e}")
-                self.vosk_recognizer = None
+                error = e
+                logger.error(f"Ошибка перезагрузки распознавателя: {e}")
+                self.current_recognizer = None
+                self.engine_manager.state = EngineState.ERROR
 
             # Обновляем UI в главном потоке
-            self.root.after(0, self._update_status)
+            self.root.after(0, lambda: self._finish_recognizer_reload(new_recognizer, requested_label, error, show_messages))
 
         # Запускаем в фоновом потоке
-        threading.Thread(target=reload_in_thread, name="VoskReloadThread", daemon=True).start()
+        threading.Thread(target=reload_in_thread, name="RecognizerReloadThread", daemon=True).start()
+
+    def _finish_recognizer_reload(self, recognizer, requested_label: str, error: Optional[Exception], show_messages: bool):
+        """Applies recognizer reload results on the Tk main thread."""
+        self._update_status()
+        if self.recording_status:
+            self.recording_status.configure(text="Нажмите кнопку для начала записи", text_color=COLORS.text_secondary)
+
+        if error:
+            self._show_error("Ошибка", f"Не удалось загрузить {requested_label}: {error}")
+            return
+
+        if not recognizer:
+            self._show_error("Ошибка", f"Не удалось загрузить {requested_label}. Проверьте модели и зависимости.")
+            return
+
+        if show_messages and not self._recognizer_matches_config(recognizer):
+            self._show_warning(
+                "Fallback",
+                f"{requested_label} недоступен. Загружен: {self._recognizer_engine_status(recognizer)}"
+            )
+
+    def _configured_engine_summary(self) -> str:
+        if self.config.engine == "vosk":
+            model = "0.22" if self.config.vosk_model_size == "large" else "0.42"
+            return f"Vosk {model}"
+        return f"Whisper {self.config.whisper_backend} {self.config.whisper_model}"
 
     def _save_config(self):
         """Сохраняет конфигурацию в файл."""
@@ -1135,6 +1321,10 @@ class VoiceTranslatorApp:
         """Показывает сообщение об ошибке."""
         messagebox.showerror(title, message)
 
+    def _show_warning(self, title: str, message: str):
+        """Показывает предупреждение."""
+        messagebox.showwarning(title, message)
+
     def _on_close(self):
         """Обработчик закрытия окна."""
         logger.info("Закрытие приложения...")
@@ -1145,8 +1335,8 @@ class VoiceTranslatorApp:
         if self.audio_capture:
             self.audio_capture.__exit__(None, None, None)
 
-        if self.vosk_recognizer:
-            self.vosk_recognizer.unload()
+        if self.current_recognizer:
+            self.current_recognizer.unload()
 
         if self.translator:
             self.translator.unload()
