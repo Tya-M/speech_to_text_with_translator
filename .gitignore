@@ -1,0 +1,12 @@
+.DS_Store
+__pycache__/
+*.py[cod]
+*$py.class
+
+venv/
+models/
+*.log
+*.tmp
+
+Voice Translator.app/
+*.zip
