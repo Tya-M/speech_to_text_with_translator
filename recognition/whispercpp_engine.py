@@ -6,6 +6,7 @@ machine. GPU use is reported only when runtime initialization output confirms
 Metal and the expected AMD device.
 """
 
+import importlib.util
 import logging
 import os
 import tempfile
@@ -22,12 +23,16 @@ from utils.threading_utils import RecognitionResult
 logger = logging.getLogger("voice_translator.recognition.whispercpp")
 
 try:
+    if importlib.util.find_spec("pywhispercpp") is None:
+        raise ImportError("pywhispercpp is not installed")
     from pywhispercpp.model import Model as WhisperCppModel
-
-    WHISPER_CPP_AVAILABLE = True
-except ImportError:
+except Exception as e:
     WhisperCppModel = None
     WHISPER_CPP_AVAILABLE = False
+    WHISPER_CPP_IMPORT_ERROR = e
+else:
+    WHISPER_CPP_AVAILABLE = True
+    WHISPER_CPP_IMPORT_ERROR = None
 
 
 class WhisperCppRecognizer(BaseRecognizer):
@@ -59,27 +64,20 @@ class WhisperCppRecognizer(BaseRecognizer):
     def load(self) -> bool:
         """Loads pywhispercpp and records whether Metal/RX 580 initialized."""
         if not WHISPER_CPP_AVAILABLE:
-            logger.error("pywhispercpp недоступен. Соберите/установите pywhispercpp с Metal")
+            logger.error(
+                "pywhispercpp недоступен. Соберите/установите pywhispercpp с Metal: %s",
+                WHISPER_CPP_IMPORT_ERROR,
+            )
             return False
 
         if self._is_loaded:
             logger.debug("whisper.cpp модель уже загружена")
             return True
 
+        log_path = self._init_log_path()
         try:
-            from pywhispercpp.utils import resolve_model_path
-
             self.model_dir.mkdir(parents=True, exist_ok=True)
-            model_path = resolve_model_path(self.model_name, str(self.model_dir))
-            log_path = self._init_log_path()
-            self._model = WhisperCppModel(
-                model_path,
-                models_dir=str(self.model_dir),
-                redirect_whispercpp_logs_to=log_path,
-                context_params={"use_gpu": self.use_gpu},
-                n_threads=os.cpu_count() or 1,
-                language=self.language,
-            )
+            self._model = self._create_model(use_gpu=self.use_gpu, log_path=log_path)
 
             self.init_log = self._read_init_log(log_path)
             self.gpu_active = self._detect_metal_gpu(self.init_log)
@@ -93,11 +91,17 @@ class WhisperCppRecognizer(BaseRecognizer):
             self._is_loaded = True
             return True
         except Exception as e:
-            logger.error("Ошибка загрузки whisper.cpp: %s", e)
-            self._model = None
-            self._is_loaded = False
-            self.gpu_active = False
-            return False
+            if not self.use_gpu:
+                self.init_log = self._read_init_log(log_path)
+                logger.error("Ошибка загрузки whisper.cpp CPU: %s", e)
+                self._model = None
+                self._is_loaded = False
+                self.gpu_active = False
+                return False
+
+            self.init_log = self._read_init_log(log_path)
+            logger.warning("Ошибка загрузки whisper.cpp с GPU, повтор CPU: %s", e)
+            return self._load_cpu_fallback()
 
     def unload(self) -> None:
         """Unloads the model and clears buffered audio."""
@@ -157,6 +161,36 @@ class WhisperCppRecognizer(BaseRecognizer):
     def reset(self) -> None:
         """Clears buffered stream audio."""
         self._buffer.clear()
+
+    def _load_cpu_fallback(self) -> bool:
+        log_path = self._init_log_path()
+        try:
+            self._model = self._create_model(use_gpu=False, log_path=log_path)
+            self.init_log = self._read_init_log(log_path)
+            self.gpu_active = False
+            self._is_loaded = True
+            logger.info("whisper.cpp загружен в CPU fallback режиме")
+            return True
+        except Exception as e:
+            self.init_log = self._read_init_log(log_path)
+            logger.error("Ошибка CPU fallback whisper.cpp: %s", e)
+            self._model = None
+            self._is_loaded = False
+            self.gpu_active = False
+            return False
+
+    def _create_model(self, use_gpu: bool, log_path: str):
+        from pywhispercpp.utils import resolve_model_path
+
+        model_path = resolve_model_path(self.model_name, str(self.model_dir))
+        return WhisperCppModel(
+            model_path,
+            models_dir=str(self.model_dir),
+            redirect_whispercpp_logs_to=log_path,
+            context_params={"use_gpu": use_gpu},
+            n_threads=os.cpu_count() or 1,
+            language=self.language,
+        )
 
     @classmethod
     def _detect_metal_gpu(cls, init_log: str) -> bool:
