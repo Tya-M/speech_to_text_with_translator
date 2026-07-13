@@ -5,10 +5,10 @@
 
 ## Current status
 
-- **Phase:** 6 — deps, Metal build, models
-- **Last completed task:** `T05_gui_wiring`
-- **NEXT TASK:** `T06_deps_build_models`
-- **Active branch:** `feat/T05-gui-wiring`
+- **Phase:** 7 — verification & acceptance
+- **Last completed task:** `T06_deps_build_models` docs/deps complete; model download and Metal runtime verification deferred to T07
+- **NEXT TASK:** `T07_verification_acceptance`
+- **Active branch:** `feat/T06-deps-build-models`
 - **Last updated:** 2026-07-13
 
 ## Task checklist
@@ -20,7 +20,7 @@
 | T03  | Factory + fallback chain | Done | `feat/T03-factory-fallback` | Yes (`5393932`) |
 | T04  | GPU engine: whisper.cpp + Metal (AMD RX 580) | code complete — on-device Metal/GPU verification DEFERRED to T06/T07 | `feat/T04-whispercpp-metal` | Offline checks only; Metal not verified |
 | T05  | GUI wiring: selectors + real status bar | Done | `feat/T05-gui-wiring` | Offline GUI/fallback smoke checks (`3e72596`) |
-| T06  | Deps, macOS Metal build, models | Not started | | |
+| T06  | Deps, macOS Metal build, models | Done | `feat/T06-deps-build-models` | Offline docs/import checks; ggml model download and Metal runtime verification deferred to T07 (`9f88220`) |
 | T07  | Verification & acceptance (ship gate) | Not started | | |
 
 Status values: `Not started` → `In progress` → `Done`.
@@ -36,6 +36,7 @@ _(Codex appends one short entry per completed task: what changed, how verified, 
 - 2026-07-13: T04 added optional `WhisperCppRecognizer` and factory wiring (`2750bf0`); pywhispercpp built with `GGML_METAL=ON` after forcing Python 3.11 and adding local rpath, but ggml model download from Hugging Face CDN returns 502 so real Metal/RX 580 verification is still blocked.
 - 2026-07-13: T04 is code complete offline on `feat/T04-whispercpp-metal`; on the AMD RX 580 later verify exactly: `ggml_metal_init` picks the RX 580, GPU activity appears in Activity Monitor, and the Russian sample transcribes successfully.
 - 2026-07-13: T05 wired GUI engine/backend/model selectors through the recognizer factory, added background reload + fallback warning/status labels, and verified py_compile, GUI import, selector helper, and fake fallback reload smoke checks (`3e72596`).
+- 2026-07-13: T06 made Whisper deps optional in requirements and added concise macOS Metal/model setup docs; verified py_compile, GUI import, and pywhispercpp import, with ggml model download and AMD RX 580 Metal runtime checks deferred to T07 (`9f88220`).
 
 ## How to resume in a NEW chat (paste this prompt)
 
@@ -48,5 +49,5 @@ Before writing any code:
 4. Confirm the branch/repo state noted in PROGRESS.md.
 Then do ONLY that one task, run its Acceptance checklist, update PROGRESS.md,
 print a handoff, and STOP for my confirmation before the next task.
-The next task per PROGRESS.md is: T06_deps_build_models.
+The next task per PROGRESS.md is: T07_verification_acceptance.
 ```
