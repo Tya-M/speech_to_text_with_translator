@@ -8,13 +8,13 @@ numpy>=1.21.0,<2.0.0
 # Speech Recognition - Vosk (fast, offline)
 vosk>=0.3.44
 
-# Speech Recognition - Whisper
-# faster-whisper рекомендуется - 4x быстрее на CPU!
-faster-whisper>=1.0.0
-
-# Fallback: openai-whisper (медленнее, но работает без faster-whisper)
+# Optional Speech Recognition - Whisper
+# Install these only when using Whisper backends. The app keeps running with Vosk only.
+# faster-whisper is CPU-only on this Intel/AMD macOS target.
+# faster-whisper>=1.0.0
 # openai-whisper>=20231117
-# torch>=2.0.0
+# pywhispercpp must be built from source for Metal; see README.
+# pywhispercpp
 
 # Translation - Argos (offline)
 argostranslate>=1.9.0
