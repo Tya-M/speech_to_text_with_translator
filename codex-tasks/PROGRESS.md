@@ -21,7 +21,7 @@
 | T04  | GPU engine: whisper.cpp + Metal (AMD RX 580) | code complete — on-device Metal/GPU verification DEFERRED to T06/T07 | `feat/T04-whispercpp-metal` | Offline checks only; Metal not verified |
 | T05  | GUI wiring: selectors + real status bar | Done | `feat/T05-gui-wiring` | Offline GUI/fallback smoke checks (`3e72596`) |
 | T06  | Deps, macOS Metal build, models | Done | `feat/T06-deps-build-models` | Offline docs/import checks; ggml model download and Metal runtime verification deferred to T07 (`9f88220`) |
-| T07  | Verification & acceptance (ship gate) | In progress | `feat/T07-verification` | CPU rows pass; whisper.cpp blocked by ggml model download 502; manual GPU/app confirmations pending |
+| T07  | Verification & acceptance (ship gate) | In progress | `feat/T07-verification` | Matrix rows pass headlessly; Metal selects AMD RX 580; manual GPU/app confirmations pending |
 
 Status values: `Not started` → `In progress` → `Done`.
 
@@ -38,6 +38,7 @@ _(Codex appends one short entry per completed task: what changed, how verified, 
 - 2026-07-13: T05 wired GUI engine/backend/model selectors through the recognizer factory, added background reload + fallback warning/status labels, and verified py_compile, GUI import, selector helper, and fake fallback reload smoke checks (`3e72596`).
 - 2026-07-13: T06 made Whisper deps optional in requirements and added concise macOS Metal/model setup docs; verified py_compile, GUI import, and pywhispercpp import, with ggml model download and AMD RX 580 Metal runtime checks deferred to T07 (`9f88220`).
 - 2026-07-13: T07 started on `feat/T07-verification`; Vosk, faster-whisper CPU int8, and openai-whisper CPU transcribed the bundled sample; pywhispercpp was rebuilt from source and imports with Metal linkage, but `ggml-small.bin` download fails with proxy 502 so whisper.cpp Metal runtime and user GPU/app quality confirmations remain pending.
+- 2026-07-13: T07 whisper.cpp row ran after `ggml-small.bin` was placed locally; `ggml_metal_init` picked `AMD Radeon RX 580`, transcript matched the Russian sample, xRT was 2.098; Activity Monitor GPU observation and live app quality confirmation still pending.
 
 ## How to resume in a NEW chat (paste this prompt)
 
