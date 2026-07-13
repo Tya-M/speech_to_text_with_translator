@@ -8,7 +8,7 @@
 - **Phase:** 2 — CPU Whisper engines complete
 - **Last completed task:** `T02_cpu_engines`
 - **NEXT TASK:** `T03_factory_fallback`
-- **Active branch:** n/a (not a git repository in this workspace)
+- **Active branch:** `feat/T03-factory-fallback`
 - **Last updated:** 2026-07-13
 
 ## Task checklist
@@ -31,6 +31,7 @@ _(Codex appends one short entry per completed task: what changed, how verified, 
 
 - 2026-07-13: T01 added Whisper backend/device/model config fields and example config values; verified config compatibility/round-trip, GUI import, py_compile, and Vosk model presence (no commit: workspace is not a git repo).
 - 2026-07-13: T02 added CPU-only openai-whisper and faster-whisper recognizers with guarded imports; verified both plus Vosk on the bundled Russian sample (no commit: workspace is not a git repo).
+- 2026-07-13: Git initialized; source-only baseline committed on `main` as `8320976` (`baseline before codex-tasks`); next task branch is `feat/T03-factory-fallback`.
 
 ## How to resume in a NEW chat (paste this prompt)
 
