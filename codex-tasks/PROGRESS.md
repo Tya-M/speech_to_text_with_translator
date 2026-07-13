@@ -5,10 +5,10 @@
 
 ## Current status
 
-- **Phase:** 3 — factory + fallback chain complete
+- **Phase:** 4 — GPU whisper.cpp + Metal in progress
 - **Last completed task:** `T03_factory_fallback`
 - **NEXT TASK:** `T04_gpu_whispercpp_metal`
-- **Active branch:** `feat/T03-factory-fallback`
+- **Active branch:** `feat/T04-gpu-whispercpp-metal`
 - **Last updated:** 2026-07-13
 
 ## Task checklist
@@ -18,7 +18,7 @@
 | T01  | Config foundation | Done | n/a | Config yes; Vosk model present |
 | T02  | CPU engines (openai + faster-whisper) | Done | n/a | Yes |
 | T03  | Factory + fallback chain | Done | `feat/T03-factory-fallback` | Yes (`5393932`) |
-| T04  | GPU engine: whisper.cpp + Metal (AMD RX 580) | Not started | | |
+| T04  | GPU engine: whisper.cpp + Metal (AMD RX 580) | In progress | `feat/T04-gpu-whispercpp-metal` | Blocked: ggml model download 502; Metal not verified |
 | T05  | GUI wiring: selectors + real status bar | Not started | | |
 | T06  | Deps, macOS Metal build, models | Not started | | |
 | T07  | Verification & acceptance (ship gate) | Not started | | |
@@ -33,6 +33,7 @@ _(Codex appends one short entry per completed task: what changed, how verified, 
 - 2026-07-13: T02 added CPU-only openai-whisper and faster-whisper recognizers with guarded imports; verified both plus Vosk on the bundled Russian sample (no commit: workspace is not a git repo).
 - 2026-07-13: Git initialized; source-only baseline committed on `main` as `8320976` (`baseline before codex-tasks`); next task branch is `feat/T03-factory-fallback`.
 - 2026-07-13: T03 added `create_recognizer(...)` with requested-engine selection and CPU/Vosk fallback chain; verified fake failure paths and real cached engine smoke checks (`5393932`).
+- 2026-07-13: T04 added optional `WhisperCppRecognizer` and factory wiring (`2750bf0`); pywhispercpp built with `GGML_METAL=ON` after forcing Python 3.11 and adding local rpath, but ggml model download from Hugging Face CDN returns 502 so real Metal/RX 580 verification is still blocked.
 
 ## How to resume in a NEW chat (paste this prompt)
 
