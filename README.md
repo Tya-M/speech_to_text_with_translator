@@ -4,7 +4,7 @@
 
 ## Возможности
 
-- **Два движка распознавания:** Vosk (быстро) и Whisper (точно)
+- **Два движка распознавания:** Vosk (быстро) и GigaAM (точно, SberDevices)
 - **Офлайн перевод** с Argos Translate (RU → EN)
 - **Тёмная тема** с современным интерфейсом
 - **Real-time визуализация** уровня громкости
@@ -31,53 +31,38 @@ cd ..
 python main.py
 ```
 
-## Optional Whisper + Metal setup
+## Настройка GigaAM (SberDevices)
 
-The base app works with Vosk only. Install Whisper extras only when you need the GUI Whisper backends:
+Базовое приложение работает и только на Vosk. GigaAM — более точный офлайн-движок для русской речи. Установите его, когда нужна максимальная точность:
 
 ```bash
 source venv/bin/activate
-pip install faster-whisper openai-whisper
-pip install --no-binary :all: pywhispercpp
+# ffmpeg обязателен для чтения аудио GigaAM
+brew install ffmpeg
+# GigaAM v3 (модели v3_e2e_ctc / v3_e2e_rnnt) устанавливается из исходников GitHub
+pip install "gigaam @ git+https://github.com/salute-developers/GigaAM.git"
 ```
 
-macOS prerequisites for whisper.cpp/Metal builds:
+Зависимости PyTorch и torchaudio устанавливаются автоматически вместе с `gigaam`.
+
+Модели:
+
+- **v3 RNNT** (`v3_e2e_rnnt`) — точнее, выбрана по умолчанию.
+- **v3 CTC** (`v3_e2e_ctc`) — быстрее.
+- Обе модели end-to-end: возвращают текст с пунктуацией и нормализацией.
+- Веса скачиваются с Hugging Face при первом запуске, далее работают офлайн.
+
+Устройство (`gigaam_device`) по умолчанию `cpu`; при наличии CUDA-GPU можно указать `cuda` в `config.json`.
+
+Проверка после установки:
 
 ```bash
-xcode-select --install
-brew install cmake ninja ffmpeg
-```
-
-On this Intel macOS + AMD RX 580 target:
-
-- `faster-whisper` and `openai-whisper` are CPU-only.
-- The only GPU path is `pywhispercpp`/whisper.cpp with Metal.
-- Do not accept GPU status unless runtime logs show `ggml_metal_init` selecting `AMD Radeon RX 580`.
-
-Optional whisper.cpp CLI fallback build:
-
-```bash
-git clone https://github.com/ggml-org/whisper.cpp
-cmake -B whisper.cpp/build -DGGML_METAL=1 whisper.cpp
-cmake --build whisper.cpp/build -j --config Release
-```
-
-Models:
-
-- Vosk stays in `models/vosk-model-ru` or `models/vosk-model-ru-0.22`.
-- pywhispercpp uses `models/whisper-cpp` from `whisper_cpp_model_dir`; it can auto-download by model name when network is available.
-- Offline placement: put a matching `ggml-small*.bin` or `ggml-medium*.bin` file in `models/whisper-cpp`.
-- openai-whisper and faster-whisper use their configured cache dirs under `models/`.
-
-Verification after installing/building on the AMD RX 580 machine:
-
-```bash
-python -c "import pywhispercpp; print('pywhispercpp import ok')"
-python -m py_compile recognition/whispercpp_engine.py recognition/__init__.py app/gui.py
+python -c "import gigaam; print('gigaam import ok')"
+python -m py_compile recognition/gigaam_engine.py recognition/__init__.py app/gui.py
 python main.py
 ```
 
-In the app, choose `Whisper` → `whisper.cpp (GPU)` → `small`, then verify logs contain `ggml_metal_init` picking the RX 580, Activity Monitor shows GPU activity, and the Russian sample transcribes.
+В приложении выберите `GigaAM` → `Модель GigaAM` (`v3 RNNT` или `v3 CTC`). Если пакет `gigaam` не установлен, приложение автоматически откатывается на Vosk.
 
 ## Горячие клавиши
 
@@ -93,4 +78,6 @@ In the app, choose `Whisper` → `whisper.cpp (GPU)` → `small`, then verify lo
 
 **Vosk не найден** — проверьте путь `models/vosk-model-ru/`
 
-**Медленный Whisper** — используйте Vosk для real-time или уменьшите chunk_duration
+**GigaAM не установлен / ошибка импорта** — установите пакет (`pip install "gigaam @ git+https://github.com/salute-developers/GigaAM.git"`) и `ffmpeg`; до этого приложение работает на Vosk
+
+**Медленный GigaAM** — используйте Vosk для real-time, модель `v3 CTC` или уменьшите chunk_duration

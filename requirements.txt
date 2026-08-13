@@ -8,13 +8,12 @@ numpy>=1.21.0,<2.0.0
 # Speech Recognition - Vosk (fast, offline)
 vosk>=0.3.44
 
-# Optional Speech Recognition - Whisper
-# Install these only when using Whisper backends. The app keeps running with Vosk only.
-# faster-whisper is CPU-only on this Intel/AMD macOS target.
-# faster-whisper>=1.0.0
-# openai-whisper>=20231117
-# pywhispercpp must be built from source for Metal; see README.
-# pywhispercpp
+# Speech Recognition - GigaAM (SberDevices, offline after first download)
+# GigaAM v3 (модели v3_e2e_ctc / v3_e2e_rnnt) требует установки из исходников GitHub
+# (версия на PyPI пока не содержит v3). Также нужен ffmpeg в PATH.
+#   pip install "gigaam @ git+https://github.com/salute-developers/GigaAM.git"
+# Зависимости PyTorch/torchaudio устанавливаются автоматически вместе с gigaam.
+# Приложение продолжает работать на Vosk, если gigaam не установлен.
 
 # Translation - Argos (offline)
 argostranslate>=1.9.0

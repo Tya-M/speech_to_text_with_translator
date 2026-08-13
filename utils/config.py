@@ -21,9 +21,12 @@ class AppConfig:
     """Конфигурация приложения с валидацией."""
 
     # Движок распознавания
-    engine: Literal["vosk", "whisper"] = "whisper"
-    whisper_model: Literal["tiny", "base", "small", "medium", "large-v2", "large-v3"] = "small"
-    whisper_backend: Literal["openai", "faster", "whisper_cpp"] = "whisper_cpp"
+    engine: Literal["vosk", "gigaam"] = "gigaam"
+
+    # Параметры GigaAM (SberDevices)
+    gigaam_model: Literal["v3_e2e_ctc", "v3_e2e_rnnt"] = "v3_e2e_rnnt"
+    gigaam_device: Literal["auto", "cpu", "cuda"] = "cpu"
+    gigaam_language: str = "ru"
 
     # Параметры Vosk
     vosk_model_size: Literal["small", "large"] = "small"  # small=0.42, large=0.22
@@ -35,7 +38,7 @@ class AppConfig:
     device_index: int = 0
     device_name: str = ""  # Имя устройства для поиска при загрузке
     sample_rate: int = 16000
-    chunk_duration: float = 3.0  # секунд для Whisper
+    chunk_duration: float = 3.0  # секунд на окно распознавания (GigaAM работает с записями до ~25 с)
 
     # UI настройки
     font_size: int = 14
@@ -45,13 +48,6 @@ class AppConfig:
     # Пути к моделям
     vosk_model_path: str = "models/vosk-model-ru"
     vosk_large_model_path: str = "models/vosk-model-ru-0.22"
-    whisper_cache_dir: str = "models/whisper"
-    faster_whisper_cache_dir: str = "models/faster-whisper"
-    whisper_compute_type: str = "int8"
-    whisper_device: Literal["auto", "cpu", "gpu"] = "auto"
-    whisper_cpp_model_dir: str = "models/whisper-cpp"
-    whisper_cpp_use_gpu: bool = True
-    whisper_language: str = "ru"
 
     # Кэш переводов
     translation_cache_size: int = 100
@@ -65,21 +61,27 @@ class AppConfig:
         self.vad_threshold = max(200, min(1000, self.vad_threshold))
         self.font_size = max(10, min(24, self.font_size))
         self.chunk_duration = max(1.0, min(10.0, self.chunk_duration))
-        allowed_backends = {"openai", "faster", "whisper_cpp"}
-        self.whisper_backend = str(self.whisper_backend).strip().lower()
-        if self.whisper_backend not in allowed_backends:
-            logger.warning("Неизвестный Whisper backend '%s', используем whisper_cpp", self.whisper_backend)
-            self.whisper_backend = "whisper_cpp"
 
-        allowed_devices = {"auto", "cpu", "gpu"}
-        self.whisper_device = str(self.whisper_device).strip().lower()
-        if self.whisper_device not in allowed_devices:
-            logger.warning("Неизвестное Whisper device '%s', используем auto", self.whisper_device)
-            self.whisper_device = "auto"
+        allowed_engines = {"vosk", "gigaam"}
+        self.engine = str(self.engine).strip().lower()
+        if self.engine not in allowed_engines:
+            logger.warning("Неизвестный движок '%s', используем gigaam", self.engine)
+            self.engine = "gigaam"
 
-        self.whisper_compute_type = str(self.whisper_compute_type or "int8").strip() or "int8"
-        self.whisper_cpp_model_dir = str(self.whisper_cpp_model_dir or "models/whisper-cpp").strip()
-        self.whisper_language = str(self.whisper_language or "ru").strip().lower() or "ru"
+        allowed_models = {"v3_e2e_ctc", "v3_e2e_rnnt"}
+        self.gigaam_model = str(self.gigaam_model).strip().lower()
+        if self.gigaam_model not in allowed_models:
+            logger.warning("Неизвестная модель GigaAM '%s', используем v3_e2e_rnnt", self.gigaam_model)
+            self.gigaam_model = "v3_e2e_rnnt"
+
+        allowed_devices = {"auto", "cpu", "cuda"}
+        self.gigaam_device = str(self.gigaam_device).strip().lower()
+        if self.gigaam_device not in allowed_devices:
+            logger.warning("Неизвестное GigaAM device '%s', используем cpu", self.gigaam_device)
+            self.gigaam_device = "cpu"
+
+        self.gigaam_language = str(self.gigaam_language or "ru").strip().lower() or "ru"
+
         # Валидация троттлинга partial (50–300 мс)
         try:
             self.partial_throttle_ms = int(self.partial_throttle_ms)

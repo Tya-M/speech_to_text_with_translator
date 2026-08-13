@@ -297,6 +297,6 @@ class AudioCapture:
         return self._is_capturing
     
     def audio_to_numpy(self, data: bytes) -> np.ndarray:
-        """Конвертирует bytes в numpy array для Whisper."""
+        """Конвертирует bytes в numpy array для распознавания."""
         audio_array = np.frombuffer(data, dtype=np.int16).astype(np.float32)
         return audio_array / 32768.0  # Нормализация [-1, 1]

@@ -18,7 +18,7 @@ const COLORS = {
 
 // Компонент Toggle для выбора движка
 const EngineToggle = ({ value, onChange }) => {
-  const options = ['Vosk (Быстро)', 'Whisper (Точно)'];
+  const options = ['Vosk (Быстро)', 'GigaAM (Точно)'];
   
   return (
     <div className="relative flex bg-opacity-50 rounded-full p-1" style={{ backgroundColor: COLORS.bgTertiary }}>
@@ -307,9 +307,9 @@ export default function VoiceTranslatorPreview() {
         <div className="flex justify-between mt-4 text-xs" style={{ color: COLORS.textMuted }}>
           <div className="flex gap-4">
             <span style={{ color: COLORS.accentSuccess }}>
-              ● Движок: {engine === 0 ? 'Vosk' : 'Whisper'}
+              ● Движок: {engine === 0 ? 'Vosk' : 'GigaAM'}
             </span>
-            <span>Модель: {engine === 0 ? 'Russian 0.42' : 'small'}</span>
+            <span>Модель: {engine === 0 ? 'Russian 0.42' : 'v3 RNNT'}</span>
           </div>
           <div className="flex gap-4">
             <span>Кэш: 67%</span>

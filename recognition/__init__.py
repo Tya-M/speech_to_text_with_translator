@@ -4,21 +4,19 @@ import logging
 from typing import Callable, Optional
 
 from .base import BaseRecognizer
+from .filters import HallucinationFilter
 from .vosk_engine import VoskRecognizer, VOSK_AVAILABLE
-from .whisper_engine import WhisperRecognizer, WHISPER_AVAILABLE, HallucinationFilter
-from .faster_whisper_engine import FasterWhisperRecognizer, FASTER_WHISPER_AVAILABLE
-from .whispercpp_engine import WhisperCppRecognizer, WHISPER_CPP_AVAILABLE
+from .gigaam_engine import GigaAMRecognizer, GIGAAM_AVAILABLE
 from utils.config import AppConfig, RecognitionConfig
 
 logger = logging.getLogger("voice_translator.recognition")
 
+
 def create_recognizer(config: AppConfig, rec_config: RecognitionConfig) -> Optional[BaseRecognizer]:
     """
-    Creates and loads the requested recognizer, falling back to CPU engines and Vosk.
+    Creates and loads the requested recognizer, falling back to the other engine.
 
-    Fallback order after the requested engine fails:
-    faster-whisper (CPU) -> openai-whisper (CPU) -> Vosk.
-    whisper_cpp uses pywhispercpp when available; otherwise it falls back to CPU.
+    Fallback order after the requested engine fails: GigaAM -> Vosk.
     """
     attempted: set[str] = set()
 
@@ -55,8 +53,7 @@ def _recognizer_candidates(
 ) -> list[tuple[str, Callable[[], BaseRecognizer]]]:
     requested = _requested_candidates(config, rec_config)
     fallbacks = [
-        _faster_whisper_candidate(config, rec_config),
-        _whisper_candidate(config, rec_config),
+        _gigaam_candidate(config, rec_config),
         _vosk_candidate(config, rec_config),
     ]
     return requested + fallbacks
@@ -68,76 +65,32 @@ def _requested_candidates(
 ) -> list[tuple[str, Callable[[], BaseRecognizer]]]:
     if config.engine == "vosk":
         return [_vosk_candidate(config, rec_config)]
+    if config.engine == "gigaam":
+        return [_gigaam_candidate(config, rec_config)]
 
-    if config.engine != "whisper":
-        logger.warning("Unknown recognition engine '%s', using fallback chain", config.engine)
-        return []
-
-    if config.whisper_backend == "faster":
-        return [_faster_whisper_candidate(config, rec_config)]
-    if config.whisper_backend == "openai":
-        return [_whisper_candidate(config, rec_config)]
-    if config.whisper_backend == "whisper_cpp":
-        return [_whisper_cpp_candidate(config, rec_config)]
-
-    logger.warning("Unknown Whisper backend '%s', using fallback chain", config.whisper_backend)
+    logger.warning("Unknown recognition engine '%s', using fallback chain", config.engine)
     return []
 
 
 def _requested_label(config: AppConfig) -> str:
     if config.engine == "vosk":
         return "vosk"
-    if config.engine == "whisper":
-        if config.whisper_backend == "faster":
-            return "faster-whisper (CPU)"
-        if config.whisper_backend == "openai":
-            return "whisper (CPU)"
-        if config.whisper_backend == "whisper_cpp":
-            return "whisper.cpp"
+    if config.engine == "gigaam":
+        return "gigaam"
     return "unknown"
 
 
-def _faster_whisper_candidate(
+def _gigaam_candidate(
     config: AppConfig,
     rec_config: RecognitionConfig,
 ) -> tuple[str, Callable[[], BaseRecognizer]]:
     return (
-        "faster-whisper (CPU)",
-        lambda: FasterWhisperRecognizer(
+        "gigaam",
+        lambda: GigaAMRecognizer(
             rec_config,
-            model_name=config.whisper_model,
-            cache_dir=config.faster_whisper_cache_dir,
-            compute_type=config.whisper_compute_type,
-        ),
-    )
-
-
-def _whisper_cpp_candidate(
-    config: AppConfig,
-    rec_config: RecognitionConfig,
-) -> tuple[str, Callable[[], BaseRecognizer]]:
-    return (
-        "whisper.cpp",
-        lambda: WhisperCppRecognizer(
-            rec_config,
-            model_name=config.whisper_model,
-            model_dir=config.whisper_cpp_model_dir,
-            use_gpu=config.whisper_cpp_use_gpu,
-            language=config.whisper_language,
-        ),
-    )
-
-
-def _whisper_candidate(
-    config: AppConfig,
-    rec_config: RecognitionConfig,
-) -> tuple[str, Callable[[], BaseRecognizer]]:
-    return (
-        "whisper (CPU)",
-        lambda: WhisperRecognizer(
-            rec_config,
-            model_name=config.whisper_model,
-            cache_dir=config.whisper_cache_dir,
+            model_name=config.gigaam_model,
+            device=config.gigaam_device,
+            language=config.gigaam_language,
         ),
     )
 
@@ -161,17 +114,11 @@ def _build_recognizer(
     label: str,
     factory: Callable[[], BaseRecognizer],
 ) -> Optional[BaseRecognizer]:
-    if label == "faster-whisper (CPU)" and not FASTER_WHISPER_AVAILABLE:
-        logger.warning("faster-whisper is unavailable, trying fallback")
-        return None
-    if label == "whisper (CPU)" and not WHISPER_AVAILABLE:
-        logger.warning("openai-whisper is unavailable, trying fallback")
+    if label == "gigaam" and not GIGAAM_AVAILABLE:
+        logger.warning("GigaAM is unavailable, trying fallback")
         return None
     if label == "vosk" and not VOSK_AVAILABLE:
         logger.warning("Vosk is unavailable")
-        return None
-    if label == "whisper.cpp" and not WHISPER_CPP_AVAILABLE:
-        logger.warning("pywhispercpp is unavailable, trying CPU fallback")
         return None
 
     try:
@@ -180,16 +127,13 @@ def _build_recognizer(
         logger.warning("Could not create recognizer %s: %s", label, e)
         return None
 
+
 __all__ = [
     'BaseRecognizer',
     'VoskRecognizer',
     'VOSK_AVAILABLE',
-    'WhisperRecognizer',
-    'WHISPER_AVAILABLE',
-    'FasterWhisperRecognizer',
-    'FASTER_WHISPER_AVAILABLE',
-    'WhisperCppRecognizer',
-    'WHISPER_CPP_AVAILABLE',
+    'GigaAMRecognizer',
+    'GIGAAM_AVAILABLE',
     'HallucinationFilter',
     'create_recognizer',
 ]

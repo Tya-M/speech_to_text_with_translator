@@ -4,7 +4,7 @@ Russian Voice Translator - macOS Application
 Офлайн распознавание русской речи с переводом на английский.
 
 КРИТИЧЕСКИ ВАЖНО: Эти переменные окружения ДОЛЖНЫ быть установлены
-ДО импорта torch/whisper для предотвращения OpenMP crash на macOS.
+ДО импорта torch/gigaam для предотвращения OpenMP crash на macOS.
 """
 
 import os
@@ -35,7 +35,8 @@ def main():
     try:
         # Загружаем конфигурацию
         config = AppConfig.load()
-        logger.info(f"Конфигурация загружена: engine={config.engine}, model={config.whisper_model}")
+        model_name = config.gigaam_model if config.engine == "gigaam" else config.vosk_model_size
+        logger.info(f"Конфигурация загружена: engine={config.engine}, model={model_name}")
         
         # Создаём и запускаем приложение
         app = VoiceTranslatorApp(config)

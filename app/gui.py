@@ -61,15 +61,13 @@ class VoiceTranslatorApp:
 
     TITLE = "Голосовой Переводчик"
     VERSION = "1.0.0"
-    ENGINE_LABELS = {"Vosk": "vosk", "Whisper": "whisper"}
+    ENGINE_LABELS = {"Vosk": "vosk", "GigaAM": "gigaam"}
     ENGINE_VALUES = list(ENGINE_LABELS.keys())
-    WHISPER_BACKEND_LABELS = {
-        "whisper.cpp (GPU)": "whisper_cpp",
-        "faster-whisper (CPU)": "faster",
-        "openai (CPU)": "openai",
+    GIGAAM_MODEL_LABELS = {
+        "v3 RNNT (точнее)": "v3_e2e_rnnt",
+        "v3 CTC (быстрее)": "v3_e2e_ctc",
     }
-    WHISPER_BACKEND_VALUES = list(WHISPER_BACKEND_LABELS.keys())
-    WHISPER_MODEL_VALUES = ["tiny", "base", "small", "medium", "large-v3"]
+    GIGAAM_MODEL_VALUES = list(GIGAAM_MODEL_LABELS.keys())
 
     def __init__(self, config: AppConfig):
         self.config = config
@@ -94,8 +92,7 @@ class VoiceTranslatorApp:
         self.level_meter: Optional[LevelMeter] = None
         self.record_button: Optional[RecordButton] = None
         self.engine_menu: Optional[ctk.CTkOptionMenu] = None
-        self.backend_menu: Optional[ctk.CTkOptionMenu] = None
-        self.whisper_model_menu: Optional[ctk.CTkOptionMenu] = None
+        self.gigaam_model_menu: Optional[ctk.CTkOptionMenu] = None
         self.model_toggle: Optional[ctk.CTkSegmentedButton] = None
         self.status_bar: Optional[StatusBar] = None
         self.device_menu: Optional[ctk.CTkOptionMenu] = None
@@ -188,43 +185,24 @@ class VoiceTranslatorApp:
         self.engine_menu.set(self._engine_label_from_config())
         self.engine_menu.pack(anchor="w", pady=(2, 0))
 
-        backend_frame = ctk.CTkFrame(top_controls, corner_radius=0, fg_color="transparent")
-        backend_frame.pack(side="left", padx=(0, SPACING.sm))
+        gigaam_model_frame = ctk.CTkFrame(top_controls, corner_radius=0, fg_color="transparent")
+        gigaam_model_frame.pack(side="left", padx=(0, SPACING.sm))
 
         ctk.CTkLabel(
-            backend_frame, text="Backend:",
+            gigaam_model_frame, text="Модель GigaAM:",
             font=get_font_tuple(FONTS.size_small),
             text_color=COLORS.text_secondary
         ).pack(anchor="w")
 
-        self.backend_menu = ctk.CTkOptionMenu(
-            backend_frame,
-            values=self.WHISPER_BACKEND_VALUES,
-            command=self._on_backend_change,
+        self.gigaam_model_menu = ctk.CTkOptionMenu(
+            gigaam_model_frame,
+            values=self.GIGAAM_MODEL_VALUES,
+            command=self._on_gigaam_model_change,
             width=168,
             font=get_font_tuple(FONTS.size_small)
         )
-        self.backend_menu.set(self._backend_label_from_config())
-        self.backend_menu.pack(anchor="w", pady=(2, 0))
-
-        whisper_model_frame = ctk.CTkFrame(top_controls, corner_radius=0, fg_color="transparent")
-        whisper_model_frame.pack(side="left", padx=(0, SPACING.sm))
-
-        ctk.CTkLabel(
-            whisper_model_frame, text="Whisper:",
-            font=get_font_tuple(FONTS.size_small),
-            text_color=COLORS.text_secondary
-        ).pack(anchor="w")
-
-        self.whisper_model_menu = ctk.CTkOptionMenu(
-            whisper_model_frame,
-            values=self.WHISPER_MODEL_VALUES,
-            command=self._on_whisper_model_change,
-            width=96,
-            font=get_font_tuple(FONTS.size_small)
-        )
-        self.whisper_model_menu.set(self._whisper_model_from_config())
-        self.whisper_model_menu.pack(anchor="w", pady=(2, 0))
+        self.gigaam_model_menu.set(self._gigaam_model_label_from_config())
+        self.gigaam_model_menu.pack(anchor="w", pady=(2, 0))
 
         # Выбор модели Vosk
         vosk_model_frame = ctk.CTkFrame(top_controls, corner_radius=0, fg_color="transparent")
@@ -616,36 +594,28 @@ class VoiceTranslatorApp:
                 logger.info(f"Восстановлено устройство: {device.name}")
 
     def _engine_label_from_config(self) -> str:
-        return "Whisper" if self.config.engine == "whisper" else "Vosk"
+        return "GigaAM" if self.config.engine == "gigaam" else "Vosk"
 
-    def _backend_label_from_config(self) -> str:
-        for label, backend in self.WHISPER_BACKEND_LABELS.items():
-            if backend == self.config.whisper_backend:
+    def _gigaam_model_label_from_config(self) -> str:
+        for label, model in self.GIGAAM_MODEL_LABELS.items():
+            if model == self.config.gigaam_model:
                 return label
-        return "whisper.cpp (GPU)"
-
-    def _whisper_model_from_config(self) -> str:
-        if self.config.whisper_model in self.WHISPER_MODEL_VALUES:
-            return self.config.whisper_model
-        return "small"
+        return "v3 RNNT (точнее)"
 
     def _sync_engine_controls(self):
         """Keeps selector states aligned with the selected engine."""
         if not self.engine_menu:
             return
 
-        is_whisper = self.config.engine == "whisper"
+        is_gigaam = self.config.engine == "gigaam"
         self.engine_menu.set(self._engine_label_from_config())
-        if self.backend_menu:
-            self.backend_menu.set(self._backend_label_from_config())
-            self.backend_menu.configure(state="normal" if is_whisper else "disabled")
-        if self.whisper_model_menu:
-            self.whisper_model_menu.set(self._whisper_model_from_config())
-            self.whisper_model_menu.configure(state="normal" if is_whisper else "disabled")
+        if self.gigaam_model_menu:
+            self.gigaam_model_menu.set(self._gigaam_model_label_from_config())
+            self.gigaam_model_menu.configure(state="normal" if is_gigaam else "disabled")
         if self.model_toggle:
             model = "Точная (0.22)" if self.config.vosk_model_size == "large" else "Быстрая (0.42)"
             self.model_toggle.set(model)
-            self.model_toggle.configure(state="disabled" if is_whisper else "normal")
+            self.model_toggle.configure(state="disabled" if is_gigaam else "normal")
 
     def _load_configured_recognizer(self):
         """Loads the configured recognizer through the shared factory."""
@@ -656,13 +626,9 @@ class VoiceTranslatorApp:
         class_name = recognizer.__class__.__name__
         if class_name == "VoskRecognizer":
             return "Vosk · CPU"
-        if class_name == "WhisperCppRecognizer":
-            device = "Metal (AMD RX 580)" if getattr(recognizer, "gpu_active", False) else "CPU"
-            return f"Whisper · whisper.cpp · {device}"
-        if class_name == "FasterWhisperRecognizer":
-            return "Whisper · faster-whisper · CPU"
-        if class_name == "WhisperRecognizer":
-            return "Whisper · openai · CPU"
+        if class_name == "GigaAMRecognizer":
+            device = str(getattr(recognizer, "device", "cpu")).upper()
+            return f"GigaAM · {device}"
         return getattr(recognizer, "_model_name", recognizer.name)
 
     def _recognizer_model_status(self, recognizer) -> str:
@@ -673,12 +639,10 @@ class VoiceTranslatorApp:
 
     def _recognizer_matches_config(self, recognizer) -> bool:
         expected_by_config = {
-            ("vosk", ""): "VoskRecognizer",
-            ("whisper", "whisper_cpp"): "WhisperCppRecognizer",
-            ("whisper", "faster"): "FasterWhisperRecognizer",
-            ("whisper", "openai"): "WhisperRecognizer",
+            "vosk": "VoskRecognizer",
+            "gigaam": "GigaAMRecognizer",
         }
-        expected = expected_by_config.get((self.config.engine, self.config.whisper_backend if self.config.engine == "whisper" else ""))
+        expected = expected_by_config.get(self.config.engine)
         return recognizer.__class__.__name__ == expected
 
     def _update_status(self):
@@ -1061,33 +1025,18 @@ class VoiceTranslatorApp:
         self._sync_engine_controls()
         self._reload_recognizer(show_messages=True)
 
-    def _on_backend_change(self, backend_label: str):
-        """Обработчик смены Whisper backend."""
-        if self._is_recording:
-            self._show_error("Внимание", "Остановите запись перед сменой backend")
-            self._sync_engine_controls()
-            return
-
-        new_backend = self.WHISPER_BACKEND_LABELS.get(backend_label, "whisper_cpp")
-        if self.config.engine != "whisper" or new_backend == self.config.whisper_backend:
-            return
-
-        self.config.whisper_backend = new_backend
-        self.config.whisper_cpp_use_gpu = new_backend == "whisper_cpp"
-        self._save_config()
-        self._reload_recognizer(show_messages=True)
-
-    def _on_whisper_model_change(self, model_name: str):
-        """Обработчик смены Whisper модели."""
+    def _on_gigaam_model_change(self, model_label: str):
+        """Обработчик смены модели GigaAM."""
         if self._is_recording:
             self._show_error("Внимание", "Остановите запись перед сменой модели")
             self._sync_engine_controls()
             return
 
-        if self.config.engine != "whisper" or model_name == self.config.whisper_model:
+        new_model = self.GIGAAM_MODEL_LABELS.get(model_label, "v3_e2e_rnnt")
+        if self.config.engine != "gigaam" or new_model == self.config.gigaam_model:
             return
 
-        self.config.whisper_model = model_name
+        self.config.gigaam_model = new_model
         self._save_config()
         self._reload_recognizer(show_messages=True)
 
@@ -1188,24 +1137,11 @@ class VoiceTranslatorApp:
             )
             return
 
-        if (
-            show_messages
-            and self.config.engine == "whisper"
-            and self.config.whisper_backend == "whisper_cpp"
-            and self.config.whisper_cpp_use_gpu
-            and recognizer.__class__.__name__ == "WhisperCppRecognizer"
-            and not getattr(recognizer, "gpu_active", False)
-        ):
-            self._show_warning(
-                "Fallback",
-                "whisper.cpp GPU не подтвердил Metal. Загружен CPU fallback."
-            )
-
     def _configured_engine_summary(self) -> str:
         if self.config.engine == "vosk":
             model = "0.22" if self.config.vosk_model_size == "large" else "0.42"
             return f"Vosk {model}"
-        return f"Whisper {self.config.whisper_backend} {self.config.whisper_model}"
+        return f"GigaAM {self.config.gigaam_model}"
 
     def _save_config(self):
         """Сохраняет конфигурацию в файл."""

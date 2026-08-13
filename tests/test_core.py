@@ -16,7 +16,8 @@ class TestConfig:
     def test_config_defaults(self):
         from utils.config import AppConfig
         config = AppConfig()
-        assert config.engine in ["vosk", "whisper"]
+        assert config.engine in ["vosk", "gigaam"]
+        assert config.gigaam_model in ["v3_e2e_ctc", "v3_e2e_rnnt"]
         assert 100 <= config.sensitivity <= 2000
     
     def test_config_validation(self):
@@ -24,6 +25,13 @@ class TestConfig:
         config = AppConfig(sensitivity=5000, vad_threshold=50)
         assert config.sensitivity == 2000
         assert config.vad_threshold == 200
+
+    def test_config_normalizes_invalid_gigaam_fields(self):
+        from utils.config import AppConfig
+        config = AppConfig(engine="unknown", gigaam_model="bogus", gigaam_device="gpu")
+        assert config.engine == "gigaam"
+        assert config.gigaam_model == "v3_e2e_rnnt"
+        assert config.gigaam_device == "cpu"
 
 
 class TestTranslationCache:
@@ -45,102 +53,68 @@ class TestHallucinationFilter:
     """Тесты фильтра галлюцинаций."""
     
     def test_filter_hallucinations(self):
-        from recognition.whisper_engine import HallucinationFilter
+        from recognition.filters import HallucinationFilter
         filt = HallucinationFilter()
         assert filt.is_hallucination("Редактор субтитров")
         assert filt.is_hallucination("да да да да да да")
         assert not filt.is_hallucination("Привет, как дела?")
 
 
-class TestWhisperCppRecognizer:
-    """Тесты wrapper-логики whisper.cpp без загрузки модели."""
+class TestGigaAMRecognizer:
+    """Тесты wrapper-логики GigaAM без загрузки реальной модели."""
 
-    def test_recognize_uses_stable_russian_decode_params(self):
+    def test_recognize_transcribes_and_filters(self):
         import numpy as np
 
-        from recognition.whispercpp_engine import WhisperCppRecognizer
+        from recognition.gigaam_engine import GigaAMRecognizer
         from utils.config import RecognitionConfig
-
-        class Segment:
-            text = "Привет мир"
 
         class FakeModel:
             def __init__(self):
-                self.params = {}
+                self.calls = []
 
-            def transcribe(self, _audio, **params):
-                self.params = params
-                required = {
-                    "language": "ru",
-                    "translate": False,
-                    "no_context": True,
-                    "no_timestamps": True,
-                    "single_segment": True,
-                    "print_progress": False,
-                    "suppress_nst": True,
-                }
-                if all(params.get(key) == value for key, value in required.items()):
-                    return [Segment()]
-                return []
+            def transcribe(self, path):
+                self.calls.append(path)
+                return "Привет мир"
 
-        fake_model = FakeModel()
-        recognizer = WhisperCppRecognizer(RecognitionConfig(), language="ru")
+        recognizer = GigaAMRecognizer(RecognitionConfig(), model_name="v3_e2e_rnnt")
         recognizer._is_loaded = True
-        recognizer._model = fake_model
-        recognizer.gpu_active = True
+        recognizer._model = FakeModel()
 
-        audio = np.array([1000, -1000], dtype=np.int16).tobytes()
+        audio = np.array([1000, -1000, 1500, -1500], dtype=np.int16).tobytes()
         result = recognizer.recognize(audio)
 
         assert result is not None
         assert result.text == "Привет мир"
-        assert result.engine == "whisper.cpp (Metal)"
-        assert fake_model.params["translate"] is False
+        assert result.engine == "gigaam"
+        assert result.is_final is True
 
-    def test_filters_english_live_fillers(self):
-        from recognition.whispercpp_engine import WhisperCppRecognizer
+    def test_recognize_drops_hallucinations(self):
+        import numpy as np
+
+        from recognition.gigaam_engine import GigaAMRecognizer
         from utils.config import RecognitionConfig
 
-        recognizer = WhisperCppRecognizer(RecognitionConfig(), language="ru")
+        class FakeModel:
+            def transcribe(self, path):
+                return "Редактор субтитров"
 
-        assert recognizer._clean_text("the") == ""
-        assert recognizer._clean_text("ist") == ""
-        assert recognizer._clean_text("multingatt") == ""
-        assert recognizer._clean_text("funded") == ""
-        assert recognizer._clean_text("thanks for watching") == ""
-        assert recognizer._clean_text("Нихера не работает сюда.") == "Нихера не работает сюда."
+        recognizer = GigaAMRecognizer(RecognitionConfig())
+        recognizer._is_loaded = True
+        recognizer._model = FakeModel()
 
-    def test_filters_subtitle_and_garbled_hallucinations(self):
-        from recognition.whispercpp_engine import WhisperCppRecognizer
-        from utils.config import RecognitionConfig
+        audio = np.array([1000, -1000], dtype=np.int16).tobytes()
+        assert recognizer.recognize(audio) is None
 
-        recognizer = WhisperCppRecognizer(RecognitionConfig(), language="ru")
+    def test_extract_text_handles_object_with_text_attr(self):
+        from recognition.gigaam_engine import GigaAMRecognizer
 
-        assert recognizer._clean_text("Смотрите на видео!") == ""
-        assert recognizer._clean_text("СПОКОЙНАЯ МУЗЫКА") == ""
-        assert recognizer._clean_text("Смешка.") == ""
-        assert recognizer._clean_text("fl этотですdskem, that нель-c lives than- onère") == ""
-        assert recognizer._clean_text("�-ice�ice predideаа е, yсьто mak") == ""
-        assert recognizer._clean_text("Однажды в студию") == "Однажды в студию"
+        class Result:
+            text = "однажды в студию"
 
-    def test_prefers_local_ggml_model_file(self):
-        import tempfile
-        from pathlib import Path
-
-        from recognition.whispercpp_engine import WhisperCppRecognizer
-        from utils.config import RecognitionConfig
-
-        with tempfile.TemporaryDirectory() as tmp:
-            model_file = Path(tmp) / "ggml-medium.bin"
-            model_file.write_bytes(b"local model placeholder")
-            recognizer = WhisperCppRecognizer(
-                RecognitionConfig(),
-                model_name="medium",
-                model_dir=tmp,
-                language="ru",
-            )
-
-            assert recognizer._model_path() == str(model_file)
+        assert GigaAMRecognizer._extract_text(Result()) == "однажды в студию"
+        assert GigaAMRecognizer._extract_text("текст") == "текст"
+        assert GigaAMRecognizer._extract_text(None) == ""
 
 
 class TestOfflineArgosSentencizer:
