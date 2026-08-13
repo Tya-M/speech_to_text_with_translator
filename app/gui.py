@@ -1186,6 +1186,20 @@ class VoiceTranslatorApp:
                 "Fallback",
                 f"{requested_label} недоступен. Загружен: {self._recognizer_engine_status(recognizer)}"
             )
+            return
+
+        if (
+            show_messages
+            and self.config.engine == "whisper"
+            and self.config.whisper_backend == "whisper_cpp"
+            and self.config.whisper_cpp_use_gpu
+            and recognizer.__class__.__name__ == "WhisperCppRecognizer"
+            and not getattr(recognizer, "gpu_active", False)
+        ):
+            self._show_warning(
+                "Fallback",
+                "whisper.cpp GPU не подтвердил Metal. Загружен CPU fallback."
+            )
 
     def _configured_engine_summary(self) -> str:
         if self.config.engine == "vosk":

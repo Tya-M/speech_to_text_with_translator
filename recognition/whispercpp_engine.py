@@ -9,6 +9,7 @@ Metal and the expected AMD device.
 import importlib.util
 import logging
 import os
+import re
 import tempfile
 from pathlib import Path
 from typing import Generator, Optional
@@ -40,6 +41,39 @@ class WhisperCppRecognizer(BaseRecognizer):
 
     METAL_MARKERS = ("ggml_metal", "metal")
     AMD_DEVICE_MARKERS = ("AMD Radeon RX 580", "Radeon RX 580", "RX 580")
+    ENGLISH_FILLER_WORDS = {
+        "the",
+        "you",
+        "yeah",
+        "yes",
+        "no",
+        "ok",
+        "okay",
+        "uh",
+        "um",
+        "hmm",
+        "music",
+        "blurgy",
+        "blurry",
+    }
+    ENGLISH_FILLER_PHRASES = {
+        "thank you",
+        "thanks",
+        "thanks for watching",
+        "subscribe",
+    }
+    RUSSIAN_NOISE_PHRASES = {
+        "смотрите на видео",
+        "спокойная музыка",
+        "музыка",
+        "смех",
+        "смешка",
+        "аплодисменты",
+        "субтитры",
+    }
+    NON_RUSSIAN_SCRIPT_RE = re.compile(
+        r"[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af]"
+    )
 
     def __init__(
         self,
@@ -122,8 +156,8 @@ class WhisperCppRecognizer(BaseRecognizer):
             return None
 
         try:
-            segments = self._model.transcribe(audio_f32, language=self.language)
-            text = self._filter.clean(self._segments_to_text(segments))
+            segments = self._model.transcribe(audio_f32, **self._decode_params())
+            text = self._clean_text(self._segments_to_text(segments))
             if not text:
                 return None
 
@@ -180,17 +214,124 @@ class WhisperCppRecognizer(BaseRecognizer):
             return False
 
     def _create_model(self, use_gpu: bool, log_path: str):
-        from pywhispercpp.utils import resolve_model_path
-
-        model_path = resolve_model_path(self.model_name, str(self.model_dir))
         return WhisperCppModel(
-            model_path,
+            self._model_path(),
             models_dir=str(self.model_dir),
             redirect_whispercpp_logs_to=log_path,
             context_params={"use_gpu": use_gpu},
-            n_threads=os.cpu_count() or 1,
-            language=self.language,
+            n_threads=self._thread_count(),
+            **self._decode_params(),
         )
+
+    def _model_path(self) -> str:
+        direct = Path(self.model_name).expanduser()
+        if direct.is_file():
+            return str(direct)
+
+        local_names = [self.model_name]
+        if not self.model_name.startswith("ggml-"):
+            local_names.insert(0, f"ggml-{self.model_name}.bin")
+        elif not self.model_name.endswith(".bin"):
+            local_names.insert(0, f"{self.model_name}.bin")
+
+        for name in local_names:
+            candidate = self.model_dir / name
+            if candidate.is_file():
+                return str(candidate)
+
+        from pywhispercpp.utils import resolve_model_path
+
+        return resolve_model_path(self.model_name, str(self.model_dir))
+
+    def _decode_params(self) -> dict[str, object]:
+        return {
+            "language": self.language,
+            "translate": False,
+            "no_context": True,
+            "no_timestamps": True,
+            "single_segment": True,
+            "print_progress": False,
+            "print_realtime": False,
+            "print_timestamps": False,
+            "suppress_blank": True,
+            "suppress_nst": True,
+            "temperature": 0.0,
+            "temperature_inc": 0.0,
+        }
+
+    @staticmethod
+    def _thread_count() -> int:
+        for name in ("WHISPER_CPP_THREADS", "OMP_NUM_THREADS"):
+            value = os.environ.get(name)
+            if not value:
+                continue
+            try:
+                threads = int(value)
+            except ValueError:
+                continue
+            if threads > 0:
+                return threads
+        return min(4, os.cpu_count() or 1)
+
+    def _clean_text(self, text: str) -> str:
+        text = self._filter.clean(text)
+        if (
+            not text
+            or self._is_missing_required_script(text)
+            or self._is_english_filler(text)
+            or self._is_russian_noise_cue(text)
+            or self._is_garbled_mixed_script(text)
+        ):
+            return ""
+        return text
+
+    def _is_missing_required_script(self, text: str) -> bool:
+        if self.language.lower() != "ru":
+            return False
+        return re.search(r"[а-яё]", text, flags=re.IGNORECASE) is None
+
+    @classmethod
+    def _is_russian_noise_cue(cls, text: str) -> bool:
+        normalized = cls._normalize_words(text)
+        return normalized in cls.RUSSIAN_NOISE_PHRASES
+
+    @classmethod
+    def _is_garbled_mixed_script(cls, text: str) -> bool:
+        if "�" in text:
+            return True
+        if cls.NON_RUSSIAN_SCRIPT_RE.search(text):
+            return True
+
+        cyrillic = len(re.findall(r"[а-яё]", text, flags=re.IGNORECASE))
+        latin = len(re.findall(r"[a-z]", text, flags=re.IGNORECASE))
+        if cyrillic == 0:
+            return False
+        return latin >= 8 and latin > cyrillic * 2
+
+    @classmethod
+    def _is_english_filler(cls, text: str) -> bool:
+        if re.search(r"[а-яё]", text, flags=re.IGNORECASE):
+            return False
+
+        normalized = cls._normalize_words(text, alphabet=r"a-zA-Z")
+        if not normalized:
+            return True
+
+        if normalized in cls.ENGLISH_FILLER_PHRASES:
+            return True
+
+        words = normalized.split()
+        if words and words[0] in {"blurgy", "blurry"}:
+            return True
+        if len(words) >= 3 and len(set(words)) == 1:
+            return True
+        return bool(words) and all(word in cls.ENGLISH_FILLER_WORDS for word in words)
+
+    @staticmethod
+    def _normalize_words(text: str, alphabet: str = r"\w") -> str:
+        text = text.strip().lower().replace("ё", "е")
+        text = re.sub(rf"[^{alphabet}\s]+", " ", text, flags=re.UNICODE)
+        return re.sub(r"\s+", " ", text).strip()
 
     @classmethod
     def _detect_metal_gpu(cls, init_log: str) -> bool:

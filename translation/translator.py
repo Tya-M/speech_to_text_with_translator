@@ -4,6 +4,7 @@
 """
 
 import logging
+import re
 import threading
 from collections import OrderedDict
 from typing import Optional
@@ -82,6 +83,19 @@ class TranslationCache:
             }
 
 
+class OfflineSentenceSplitter:
+    """Small offline sentence splitter for short live phrases."""
+
+    def split_sentences(self, text: str) -> list[str]:
+        text = text.strip()
+        if not text:
+            return []
+
+        parts = re.findall(r"[^.!?…]+[.!?…]*", text)
+        sentences = [part.strip() for part in parts if part.strip()]
+        return sentences or [text]
+
+
 class Translator:
     """
     Офлайн переводчик Russian → English с использованием Argos Translate.
@@ -112,16 +126,7 @@ class Translator:
         
         try:
             logger.info("Инициализация Argos Translate...")
-            
-            # Обновляем индекс пакетов с таймаутом чтобы избежать зависания
-            import socket
-            original_timeout = socket.getdefaulttimeout()
-            socket.setdefaulttimeout(10.0)
-            try:
-                argostranslate.package.update_package_index()
-            finally:
-                socket.setdefaulttimeout(original_timeout)
-            
+
             # Проверяем, установлен ли нужный пакет
             installed_languages = argostranslate.translate.get_installed_languages()
             
@@ -137,6 +142,15 @@ class Translator:
             # Если пакет не установлен, устанавливаем
             if source_lang is None or target_lang is None:
                 logger.info("Установка языкового пакета ru→en...")
+
+                # Обновляем индекс только если локального пакета нет.
+                import socket
+                original_timeout = socket.getdefaulttimeout()
+                socket.setdefaulttimeout(10.0)
+                try:
+                    argostranslate.package.update_package_index()
+                finally:
+                    socket.setdefaulttimeout(original_timeout)
                 
                 available_packages = argostranslate.package.get_available_packages()
                 package_to_install = None
@@ -169,6 +183,8 @@ class Translator:
                 if self._translation_fn is None:
                     logger.error("Не удалось создать функцию перевода")
                     return False
+
+                self._force_offline_sentence_splitter(self._translation_fn)
                 
                 self._is_loaded = True
                 logger.info("Argos Translate инициализирован")
@@ -180,6 +196,19 @@ class Translator:
         except Exception as e:
             logger.error(f"Ошибка инициализации Argos: {e}")
             return False
+
+    def _force_offline_sentence_splitter(self, translation_fn) -> None:
+        splitter = OfflineSentenceSplitter()
+        self._replace_sentencizer(translation_fn, splitter)
+
+    def _replace_sentencizer(self, translation_fn, splitter: OfflineSentenceSplitter) -> None:
+        if hasattr(translation_fn, "sentencizer"):
+            translation_fn.sentencizer = splitter
+
+        for attr in ("underlying", "t1", "t2"):
+            child = getattr(translation_fn, attr, None)
+            if child is not None:
+                self._replace_sentencizer(child, splitter)
     
     def unload(self) -> None:
         """Выгружает переводчик."""
