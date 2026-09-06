@@ -52,7 +52,7 @@ class AudioCapture:
         
         self._pyaudio: Optional[pyaudio.PyAudio] = None
         self._stream: Optional[pyaudio.Stream] = None
-        self._audio_queue: ThreadSafeQueue[bytes] = ThreadSafeQueue(maxsize=100)
+        self._audio_queue: ThreadSafeQueue[bytes] = ThreadSafeQueue(maxsize=2000)
         self._capture_thread: Optional[StoppableThread] = None
         self._is_capturing = False
         self._lock = threading.Lock()

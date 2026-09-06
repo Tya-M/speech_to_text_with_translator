@@ -10,3 +10,6 @@ models/
 
 Voice Translator.app/
 *.zip
+
+venv_broken_backup/
+*.bak

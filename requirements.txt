@@ -31,3 +31,7 @@ customtkinter>=5.2.0
 # Vosk Large Model (опционально, ~1.5GB):
 # wget https://alphacephei.com/vosk/models/vosk-model-ru-0.22.zip
 # unzip vosk-model-ru-0.22.zip -d models/
+
+pynput>=1.7.6
+pyobjc-framework-Quartz>=10.0
+pyobjc-framework-Cocoa>=10.0
