@@ -55,6 +55,7 @@ class DictationService:
         trigger_key: str = "f9",
         mode: str = "hold",              # "hold" (push-to-talk) или "toggle"
         on_status: Optional[Callable[[str], None]] = None,
+        recognizer=None,                 # можно передать уже загруженный распознаватель
     ):
         self.config = app_config or AppConfig.load()
         self.rec_config = RecognitionConfig.from_app_config(self.config)
@@ -62,12 +63,19 @@ class DictationService:
         self.mode = mode
         self.on_status = on_status or (lambda s: logger.info(s))
 
-        self.recognizer = GigaAMRecognizer(
-            self.rec_config,
-            model_name=self.config.gigaam_model,
-            device=self.config.gigaam_device,
-            language=self.config.gigaam_language,
-        )
+        # Если распознаватель передан извне (например, из GUI) — переиспользуем его,
+        # чтобы не грузить тяжёлую модель GigaAM второй раз и не занимать лишнюю память.
+        if recognizer is not None:
+            self.recognizer = recognizer
+            self._owns_recognizer = False
+        else:
+            self.recognizer = GigaAMRecognizer(
+                self.rec_config,
+                model_name=self.config.gigaam_model,
+                device=self.config.gigaam_device,
+                language=self.config.gigaam_language,
+            )
+            self._owns_recognizer = True
         # Прямой ввод Unicode (prefer="type") — надёжнее всего на новых macOS (вкл. Tahoe).
         self.typer = CursorTyper(prefer="type")
 
@@ -84,10 +92,14 @@ class DictationService:
     # ------------------------------------------------------------------ lifecycle
     def start(self) -> bool:
         """Загружает модель, открывает микрофон и вешает глобальный хук."""
-        self.on_status("Загрузка модели GigaAM…")
-        if not self.recognizer.load():
-            self.on_status("Ошибка: не удалось загрузить GigaAM")
-            return False
+        # Свою модель загружаем; переданную извне считаем уже загруженной.
+        if self._owns_recognizer:
+            self.on_status("Загрузка модели GigaAM…")
+            if not self.recognizer.load():
+                self.on_status("Ошибка: не удалось загрузить GigaAM")
+                return False
+        else:
+            self.on_status("Использую уже загруженную модель…")
 
         self._audio = AudioCapture(
             sample_rate=self.config.sample_rate,
@@ -131,7 +143,9 @@ class DictationService:
             except Exception:
                 pass
             self._audio = None
-        self.recognizer.unload()
+        # Выгружаем модель только если она наша; общий распознаватель GUI не трогаем.
+        if self._owns_recognizer:
+            self.recognizer.unload()
         self.on_status("Остановлено.")
 
     def run_forever(self) -> None:

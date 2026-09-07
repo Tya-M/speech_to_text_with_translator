@@ -11,6 +11,9 @@ import threading
 import time
 import logging
 import json
+import os
+import sys
+import subprocess
 from datetime import datetime
 from typing import Optional, List
 from pathlib import Path
@@ -31,6 +34,18 @@ from utils.threading_utils import (
 from audio.capture import AudioCapture, AudioDevice
 from recognition import create_recognizer
 from translation import Translator, ARGOS_AVAILABLE
+
+# Глобальная диктовка «речь → текст под курсором». Импорт защищён: если не
+# установлены pynput/pyobjc, приложение всё равно запустится (кнопка будет
+# недоступна).
+try:
+    from input_injection import DictationService
+    DICTATION_AVAILABLE = True
+    _DICTATION_IMPORT_ERROR = ""
+except Exception as _dict_err:  # pragma: no cover
+    DictationService = None
+    DICTATION_AVAILABLE = False
+    _DICTATION_IMPORT_ERROR = str(_dict_err)
 
 logger = logging.getLogger("voice_translator.app.gui")
 
@@ -68,6 +83,15 @@ class VoiceTranslatorApp:
         "v3 CTC (быстрее)": "v3_e2e_ctc",
     }
     GIGAAM_MODEL_VALUES = list(GIGAAM_MODEL_LABELS.keys())
+    DICTATION_KEY_LABELS = {
+        "F7": "f7",
+        "F8": "f8",
+        "F9": "f9",
+        "F10": "f10",
+        "F12": "f12",
+        "Правый ⌥": "alt_r",
+    }
+    DICTATION_KEY_VALUES = list(DICTATION_KEY_LABELS.keys())
 
     def __init__(self, config: AppConfig):
         self.config = config
@@ -101,6 +125,9 @@ class VoiceTranslatorApp:
         self.vad_slider: Optional[ctk.CTkSlider] = None
         self.vad_label: Optional[ctk.CTkLabel] = None
         self.recording_status: Optional[ctk.CTkLabel] = None
+        self.dictation_button: Optional[ctk.CTkButton] = None
+        self.dictation_key_menu: Optional[ctk.CTkOptionMenu] = None
+        self.dictation_status: Optional[ctk.CTkLabel] = None
 
         # Устройства
         self.audio_devices: List[AudioDevice] = []
@@ -108,6 +135,12 @@ class VoiceTranslatorApp:
 
         # Флаги
         self._is_recording = False
+        # Глобальная диктовка «речь → текст под курсором».
+        # Работает ОТДЕЛЬНЫМ процессом (dictation_main.py), поэтому здесь только
+        # ссылка на процесс и флаг активности.
+        self.dictation_service = None  # оставлено для совместимости, не используется
+        self._dictation_proc = None    # subprocess процесса диктовки
+        self._dictation_active = False
         # Partial-обновления (троттлинг и одна "живая" строка)
         self._pending_partial_text: str = ""
         self._last_applied_partial: str = ""
@@ -313,6 +346,9 @@ class VoiceTranslatorApp:
         self.vad_slider.set(self.config.vad_threshold)
         self.vad_slider.pack(fill="x", pady=(2, 0))
 
+        # Панель глобальной диктовки «речь → текст под курсором»
+        self._create_dictation_panel(main_frame)
+
         # Центральная панель
         center_panel = ctk.CTkFrame(main_frame, corner_radius=0, fg_color="transparent", border_width=0)
         center_panel.pack(fill="x", pady=(0, SPACING.xs))
@@ -422,6 +458,54 @@ class VoiceTranslatorApp:
                                      lmargin1=30, lmargin2=30)
         self.text_area.tag_configure("partial", foreground=COLORS.text_secondary,
                                      font=get_font_tuple(self.config.font_size, "italic"))
+
+    def _create_dictation_panel(self, parent):
+        """Панель «Диктовка в курсор»: печать распознанной речи в любом окне."""
+        panel = ctk.CTkFrame(parent, corner_radius=SPACING.ctk_corner_radius)
+        panel.pack(fill="x", pady=(0, SPACING.xs))
+
+        row = ctk.CTkFrame(panel, corner_radius=0, fg_color="transparent")
+        row.pack(fill="x", padx=SPACING.sm, pady=SPACING.xs)
+
+        self.dictation_button = ctk.CTkButton(
+            row, text="🎤 Диктовка в курсор: ВЫКЛ",
+            command=self._toggle_dictation,
+            width=228, height=32,
+            font=get_font_tuple(FONTS.size_small, FONTS.weight_bold),
+            fg_color=COLORS.button_bg, hover_color=COLORS.button_hover,
+            text_color=COLORS.text_primary,
+        )
+        self.dictation_button.pack(side="left")
+
+        key_frame = ctk.CTkFrame(row, corner_radius=0, fg_color="transparent")
+        key_frame.pack(side="left", padx=(SPACING.sm, 0))
+        ctk.CTkLabel(
+            key_frame, text="Клавиша:",
+            font=get_font_tuple(FONTS.size_small),
+            text_color=COLORS.text_secondary,
+        ).pack(side="left", padx=(0, 4))
+        self.dictation_key_menu = ctk.CTkOptionMenu(
+            key_frame, values=self.DICTATION_KEY_VALUES,
+            command=self._on_dictation_key_change,
+            width=100, font=get_font_tuple(FONTS.size_small),
+        )
+        self.dictation_key_menu.set(self._dictation_key_label_from_config())
+        self.dictation_key_menu.pack(side="left")
+
+        self.dictation_status = ctk.CTkLabel(
+            row, text="Офлайн-диктовка выключена",
+            font=get_font_tuple(FONTS.size_small),
+            text_color=COLORS.text_secondary,
+        )
+        self.dictation_status.pack(side="left", padx=(SPACING.sm, 0))
+
+        if not DICTATION_AVAILABLE:
+            self.dictation_button.configure(state="disabled")
+            self.dictation_key_menu.configure(state="disabled")
+            self.dictation_status.configure(
+                text="Диктовка недоступна: установите pynput/pyobjc",
+                text_color=COLORS.accent_warning,
+            )
 
     def _create_context_menu(self):
         """Создаёт контекстное меню для текстовой области."""
@@ -898,6 +982,11 @@ class VoiceTranslatorApp:
         if self._is_recording:
             return
 
+        if self._dictation_active:
+            self._show_error("Внимание", "Выключите «Диктовку в курсор» перед записью в приложении.")
+            self.record_button.set_recording(False)
+            return
+
         if not self.current_recognizer:
             self._show_error("Ошибка", "Движок распознавания не загружен")
             self.record_button.set_recording(False)
@@ -952,6 +1041,192 @@ class VoiceTranslatorApp:
 
         logger.info("Запись остановлена")
 
+    # ------------------------------------------------------------------ диктовка
+    def _dictation_key_label_from_config(self) -> str:
+        for label, spec in self.DICTATION_KEY_LABELS.items():
+            if spec == self.config.dictation_key:
+                return label
+        return "F9"
+
+    def _toggle_dictation(self):
+        if self._dictation_active:
+            self._stop_dictation()
+        else:
+            self._start_dictation()
+
+    def _start_dictation(self):
+        if self._dictation_active:
+            return
+        if not DICTATION_AVAILABLE:
+            self._show_error(
+                "Диктовка недоступна",
+                "Не установлены модули pynput/pyobjc.\n\n"
+                "Установите зависимости:\n"
+                "  pip install -r requirements.txt\n\n"
+                f"Причина: {_DICTATION_IMPORT_ERROR}",
+            )
+            return
+        if self._is_recording:
+            self._show_error("Внимание", "Остановите запись в приложении перед включением диктовки.")
+            return
+
+        # ВАЖНО: диктовка запускается ОТДЕЛЬНЫМ процессом. На macOS нативные
+        # библиотеки (pynput-перехват клавиш, PyAudio, PyTorch/GigaAM) нельзя
+        # использовать из потоков процесса, которым владеет Tkinter, — это
+        # приводит к крашу всего приложения (SIGABRT/SIGILL в AppKit/Tk).
+        # Отдельный процесс полностью изолирует их от главного цикла GUI.
+        project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        script = os.path.join(project_root, "dictation_main.py")
+        if not os.path.exists(script):
+            self._show_error("Ошибка", f"Не найден файл диктовки:\n{script}")
+            return
+
+        # Передаём выбранную клавишу/режим через окружение (на случай, если
+        # dictation_main.py умеет их читать); конфиг уже сохранён в config.json.
+        env = os.environ.copy()
+        env["DICTATION_KEY"] = self.config.dictation_key
+        env["DICTATION_MODE"] = self.config.dictation_mode
+
+        try:
+            self._dictation_proc = subprocess.Popen(
+                [sys.executable, "-u", script],
+                cwd=project_root,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
+                env=env,
+            )
+        except Exception as e:
+            logger.error("Не удалось запустить процесс диктовки: %s", e)
+            self._show_error("Ошибка", f"Не удалось запустить диктовку: {e}")
+            self._dictation_proc = None
+            return
+
+        self._dictation_active = True
+        # Читаем вывод дочернего процесса в фоне и показываем статус в GUI.
+        threading.Thread(
+            target=self._dictation_reader,
+            args=(self._dictation_proc,),
+            daemon=True,
+        ).start()
+
+        key_label = self._dictation_key_label_from_config()
+        self.dictation_button.configure(
+            text="🎤 Диктовка в курсор: ВКЛ",
+            fg_color=COLORS.accent_error,
+        )
+        self.dictation_key_menu.configure(state="disabled")
+        if self.engine_menu:
+            self.engine_menu.configure(state="disabled")
+        if self.dictation_status:
+            self.dictation_status.configure(
+                text=f"Запуск диктовки ({key_label}, отдельный процесс)…",
+                text_color=COLORS.text_primary,
+            )
+        logger.info("Диктовка включена (клавиша %s, PID %s)", key_label, self._dictation_proc.pid)
+
+    def _stop_dictation(self):
+        proc = self._dictation_proc
+        if proc is not None and proc.poll() is None:
+            try:
+                proc.terminate()
+                try:
+                    proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    try:
+                        proc.wait(timeout=3)
+                    except Exception:
+                        pass
+            except Exception as e:
+                logger.error("Ошибка остановки диктовки: %s", e)
+        self._dictation_proc = None
+        self.dictation_service = None
+        was_active = self._dictation_active
+        self._dictation_active = False
+        if self.dictation_button:
+            self.dictation_button.configure(
+                text="🎤 Диктовка в курсор: ВЫКЛ",
+                fg_color=COLORS.button_bg,
+            )
+        if self.dictation_key_menu:
+            self.dictation_key_menu.configure(state="normal")
+        if self.engine_menu:
+            self.engine_menu.configure(state="normal")
+        if self.dictation_status:
+            self.dictation_status.configure(
+                text="Офлайн-диктовка выключена",
+                text_color=COLORS.text_secondary,
+            )
+        # Возвращаем управление движком согласно текущему движку
+        self._sync_engine_controls()
+        if was_active:
+            logger.info("Диктовка выключена")
+
+    def _dictation_reader(self, proc):
+        """Фоновое чтение вывода процесса диктовки; статус маршалим в Tk."""
+        try:
+            if proc.stdout is not None:
+                for line in proc.stdout:
+                    line = line.strip()
+                    if line:
+                        # _on_dictation_status сам маршалит в главный поток Tk
+                        self._on_dictation_status(line)
+        except Exception:
+            pass
+        finally:
+            try:
+                if proc.stdout is not None:
+                    proc.stdout.close()
+            except Exception:
+                pass
+        code = proc.poll()
+        if self.root:
+            self.root.after(0, lambda c=code: self._on_dictation_exit(c))
+
+    def _on_dictation_exit(self, code):
+        """Процесс диктовки завершился. Если мы остановили его штатно — ничего не делаем."""
+        if not self._dictation_active:
+            return
+        # Процесс упал/завершился сам — возвращаем интерфейс в исходное состояние.
+        self._dictation_active = False
+        self._dictation_proc = None
+        if self.dictation_button:
+            self.dictation_button.configure(
+                text="🎤 Диктовка в курсор: ВЫКЛ",
+                fg_color=COLORS.button_bg,
+            )
+        if self.dictation_key_menu:
+            self.dictation_key_menu.configure(state="normal")
+        if self.engine_menu:
+            self.engine_menu.configure(state="normal")
+        if self.dictation_status:
+            if code in (0, None, -15, 143):
+                msg = "Диктовка остановлена"
+                color = COLORS.text_secondary
+            else:
+                msg = f"Диктовка завершилась (код {code})"
+                color = COLORS.accent_warning
+            self.dictation_status.configure(text=msg, text_color=color)
+        self._sync_engine_controls()
+        logger.info("Процесс диктовки завершился (код %s)", code)
+
+    def _on_dictation_status(self, text: str):
+        """Callback из потоков диктовки — маршалим в главный поток Tk."""
+        logger.info("[dictation] %s", text)
+        if self.root and self.dictation_status:
+            self.root.after(0, lambda t=text: self.dictation_status.configure(
+                text=t, text_color=COLORS.text_primary))
+
+    def _on_dictation_key_change(self, label: str):
+        spec = self.DICTATION_KEY_LABELS.get(label, "f9")
+        if spec == self.config.dictation_key:
+            return
+        self.config.dictation_key = spec
+        self._save_config()
+        logger.info("Клавиша диктовки изменена на %s", spec)
+
     def _recognition_loop(self):
         """Основной цикл распознавания."""
         logger.debug("Recognition loop запущен")
@@ -975,6 +1250,10 @@ class VoiceTranslatorApp:
         """Обработчик смены устройства."""
         if self._is_recording:
             self._show_error("Внимание", "Остановите запись перед сменой устройства")
+            return
+
+        if self._dictation_active:
+            self._show_error("Внимание", "Выключите «Диктовку в курсор» перед сменой устройства")
             return
 
         # Находим индекс устройства по имени
@@ -1016,6 +1295,11 @@ class VoiceTranslatorApp:
             self._sync_engine_controls()
             return
 
+        if self._dictation_active:
+            self._show_error("Внимание", "Выключите «Диктовку в курсор» перед сменой движка")
+            self._sync_engine_controls()
+            return
+
         new_engine = self.ENGINE_LABELS.get(engine_label, "vosk")
         if new_engine == self.config.engine:
             return
@@ -1032,6 +1316,11 @@ class VoiceTranslatorApp:
             self._sync_engine_controls()
             return
 
+        if self._dictation_active:
+            self._show_error("Внимание", "Выключите «Диктовку в курсор» перед сменой модели")
+            self._sync_engine_controls()
+            return
+
         new_model = self.GIGAAM_MODEL_LABELS.get(model_label, "v3_e2e_rnnt")
         if self.config.engine != "gigaam" or new_model == self.config.gigaam_model:
             return
@@ -1045,6 +1334,12 @@ class VoiceTranslatorApp:
         if self._is_recording:
             self._show_error("Внимание", "Остановите запись перед сменой модели")
             # Возвращаем предыдущее значение
+            prev_model = "Точная (0.22)" if self.config.vosk_model_size == "large" else "Быстрая (0.42)"
+            self.model_toggle.set(prev_model)
+            return
+
+        if self._dictation_active:
+            self._show_error("Внимание", "Выключите «Диктовку в курсор» перед сменой модели")
             prev_model = "Точная (0.22)" if self.config.vosk_model_size == "large" else "Быстрая (0.42)"
             self.model_toggle.set(prev_model)
             return
@@ -1279,6 +1574,7 @@ class VoiceTranslatorApp:
         """Обработчик закрытия окна."""
         logger.info("Закрытие приложения...")
 
+        self._stop_dictation()
         self._stop_recording()
         self.config.save()
 

@@ -54,6 +54,10 @@ class AppConfig:
 
     # Троттлинг partial-обновлений (мс)
     partial_throttle_ms: int = 100
+
+    # Глобальная диктовка «речь → текст под курсором»
+    dictation_key: str = "f9"          # горячая клавиша (f7..f12, alt_r, cmd_r)
+    dictation_mode: Literal["hold", "toggle"] = "hold"
     
     def __post_init__(self):
         """Валидация значений после инициализации."""
@@ -88,6 +92,13 @@ class AppConfig:
         except Exception:
             self.partial_throttle_ms = 100
         self.partial_throttle_ms = max(50, min(300, self.partial_throttle_ms))
+
+        # Валидация настроек диктовки (речь → текст под курсором)
+        self.dictation_key = str(self.dictation_key or "f9").strip().lower() or "f9"
+        allowed_dictation_modes = {"hold", "toggle"}
+        self.dictation_mode = str(self.dictation_mode).strip().lower()
+        if self.dictation_mode not in allowed_dictation_modes:
+            self.dictation_mode = "hold"
     
     @classmethod
     def load(cls, path: Optional[str] = None) -> "AppConfig":
