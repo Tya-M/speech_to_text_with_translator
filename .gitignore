@@ -13,3 +13,8 @@ Voice Translator.app/
 
 venv_broken_backup/
 *.bak
+
+# Терминальные логи и дампы
+output-*.txt
+output-*.md
+[0-9]*_20*.md
