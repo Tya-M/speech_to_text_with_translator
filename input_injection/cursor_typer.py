@@ -106,8 +106,9 @@ class CursorTyper:
 
     def __init__(self, prefer: str = "type", restore_clipboard: bool = True):
         """
-        :param prefer: "type" (по умолчанию, прямой ввод Unicode — надёжнее всего
-            на новых macOS), "keystrokes" или "paste".
+        :param prefer: "type" (по умолчанию), "keystrokes" или "paste".
+            Для диктовки используется "paste", чтобы текст не зависел от
+            активной раскладки клавиатуры.
         :param restore_clipboard: восстанавливать ли буфер обмена после paste.
         """
         self.prefer = prefer
@@ -151,8 +152,8 @@ class CursorTyper:
     def _type_via_pynput_type(self, text: str) -> bool:
         """Прямой ввод символов через pynput (CGEventKeyboardSetUnicodeString).
 
-        Не трогает буфер обмена и не зависит от ⌘V; на новых macOS (вкл. Tahoe)
-        это самый надёжный способ вставить текст под курсор.
+        Не трогает буфер обмена, но конкретное приложение может обработать
+        синтетическое событие с учётом активной раскладки.
         """
         if not (_PYNPUT_OK and self._keyboard is not None):
             return False

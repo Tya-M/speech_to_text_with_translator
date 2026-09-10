@@ -88,8 +88,9 @@ class DictationService:
                     language=self.config.gigaam_language,
                 )
             self._owns_recognizer = True
-        # Прямой ввод Unicode (prefer="type") — надёжнее всего на новых macOS (вкл. Tahoe).
-        self.typer = CursorTyper(prefer="type")
+        # Вставка через буфер сохраняет Unicode и не зависит от активной раскладки.
+        # Клавиатурные способы остаются резервом, если буфер недоступен.
+        self.typer = CursorTyper(prefer="paste")
 
         self._audio: Optional[AudioCapture] = None
         self._listener: Optional[keyboard.Listener] = None
