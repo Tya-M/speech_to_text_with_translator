@@ -24,3 +24,6 @@ venv_broken_backup/
 output-*.txt
 output-*.md
 [0-9]*_20*.md
+
+# Локальные аудиосэмплы для проверки распознавания
+sample.mp3

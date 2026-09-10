@@ -3,8 +3,8 @@
 
 Сценарий (как в jot): зажал клавишу → говоришь → отпустил → текст появляется
 в месте курсора в том приложении, где вы уже работаете. Всё офлайн: распознаёт
-локальная модель GigaAM, никаких сторонних сервисов. Печатается только
-русский текст (переводчик НЕ задействован).
+локальная модель GigaAM или Parakeet, без сторонних сервисов. Переводчик не
+задействован.
 
 GigaAM — распознаватель целых высказываний, поэтому push-to-talk для него идеален:
 мы копим весь захваченный звук пока клавиша зажата, а на отпускании отправляем
@@ -25,6 +25,7 @@ from pynput import keyboard
 
 from audio.capture import AudioCapture
 from recognition.gigaam_engine import GigaAMRecognizer
+from recognition.parakeet_engine import ParakeetRecognizer
 from utils.config import AppConfig, RecognitionConfig
 from .cursor_typer import (
     CursorTyper,
@@ -54,6 +55,7 @@ class DictationService:
         app_config: Optional[AppConfig] = None,
         trigger_key: str = "f9",
         mode: str = "hold",              # "hold" (push-to-talk) или "toggle"
+        engine: str = "gigaam",
         on_status: Optional[Callable[[str], None]] = None,
         recognizer=None,                 # можно передать уже загруженный распознаватель
     ):
@@ -61,6 +63,9 @@ class DictationService:
         self.rec_config = RecognitionConfig.from_app_config(self.config)
         self.trigger = resolve_key(trigger_key)
         self.mode = mode
+        self.engine = (engine or "gigaam").strip().lower()
+        if self.engine not in {"gigaam", "parakeet"}:
+            raise ValueError(f"Неизвестный движок диктовки: {engine!r}")
         self.on_status = on_status or (lambda s: logger.info(s))
 
         # Если распознаватель передан извне (например, из GUI) — переиспользуем его,
@@ -69,12 +74,19 @@ class DictationService:
             self.recognizer = recognizer
             self._owns_recognizer = False
         else:
-            self.recognizer = GigaAMRecognizer(
-                self.rec_config,
-                model_name=self.config.gigaam_model,
-                device=self.config.gigaam_device,
-                language=self.config.gigaam_language,
-            )
+            if self.engine == "parakeet":
+                self.recognizer = ParakeetRecognizer(
+                    self.rec_config,
+                    model_path=self.config.parakeet_model_path,
+                    num_threads=self.config.parakeet_num_threads,
+                )
+            else:
+                self.recognizer = GigaAMRecognizer(
+                    self.rec_config,
+                    model_name=self.config.gigaam_model,
+                    device=self.config.gigaam_device,
+                    language=self.config.gigaam_language,
+                )
             self._owns_recognizer = True
         # Прямой ввод Unicode (prefer="type") — надёжнее всего на новых macOS (вкл. Tahoe).
         self.typer = CursorTyper(prefer="type")
@@ -94,9 +106,10 @@ class DictationService:
         """Загружает модель, открывает микрофон и вешает глобальный хук."""
         # Свою модель загружаем; переданную извне считаем уже загруженной.
         if self._owns_recognizer:
-            self.on_status("Загрузка модели GigaAM…")
+            model_label = "Parakeet English" if self.engine == "parakeet" else "GigaAM Russian"
+            self.on_status(f"Загрузка модели {model_label}…")
             if not self.recognizer.load():
-                self.on_status("Ошибка: не удалось загрузить GigaAM")
+                self.on_status(f"Ошибка: не удалось загрузить {model_label}")
                 return False
         else:
             self.on_status("Использую уже загруженную модель…")

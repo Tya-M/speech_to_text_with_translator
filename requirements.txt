@@ -35,3 +35,6 @@ customtkinter>=5.2.0
 pynput>=1.7.6
 pyobjc-framework-Quartz>=10.0
 pyobjc-framework-Cocoa>=10.0
+
+# Optional: English dictation with Parakeet Unified EN (CPU, macOS x86_64)
+# pip install "sherpa-onnx==1.13.8" "sherpa-onnx-bin==1.13.8"

@@ -19,5 +19,8 @@
   "translation_cache_size": 100,
   "partial_throttle_ms": 100,
   "dictation_key": "cmd_r",
-  "dictation_mode": "hold"
+  "dictation_mode": "hold",
+  "dictation_engine": "gigaam",
+  "parakeet_model_path": "sherpa-onnx-nemo-parakeet-unified-en-0.6b-int8-non-streaming",
+  "parakeet_num_threads": 2
 }

@@ -28,7 +28,9 @@ from input_injection import DictationService
 
 DEFAULT_KEY = "f9"
 DEFAULT_MODE = "hold"
+DEFAULT_ENGINE = "gigaam"
 VALID_MODES = ("hold", "toggle")
+VALID_ENGINES = ("gigaam", "parakeet")
 
 
 def _env_key() -> str:
@@ -45,9 +47,15 @@ def _env_mode() -> str:
     return value
 
 
+def _env_engine() -> str:
+    """Возвращает движок диктовки из окружения или безопасный default."""
+    value = os.environ.get("DICTATION_ENGINE", DEFAULT_ENGINE).strip().lower()
+    return value if value in VALID_ENGINES else DEFAULT_ENGINE
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Офлайн-диктовка в место курсора (GigaAM)"
+        description="Офлайн-диктовка в место курсора (GigaAM или Parakeet)"
     )
     parser.add_argument(
         "--key",
@@ -66,6 +74,15 @@ def build_parser() -> argparse.ArgumentParser:
             "По умолчанию: DICTATION_MODE или hold."
         ),
     )
+    parser.add_argument(
+        "--engine",
+        default=_env_engine(),
+        choices=VALID_ENGINES,
+        help=(
+            "Движок диктовки: gigaam — русский, parakeet — английский. "
+            "По умолчанию: DICTATION_ENGINE или gigaam."
+        ),
+    )
     return parser
 
 
@@ -82,6 +99,7 @@ def main() -> None:
         service = DictationService(
             trigger_key=args.key,
             mode=args.mode,
+            engine=args.engine,
             on_status=print,
         )
     except ValueError as exc:
@@ -91,6 +109,7 @@ def main() -> None:
         "Запуск диктовки: key=%s, mode=%s",
         args.key,
         args.mode,
+        extra={"engine": args.engine},
     )
     service.run_forever()
 

@@ -77,6 +77,11 @@ class VoiceTranslatorApp:
         "v3 CTC (быстрее)": "v3_e2e_ctc",
     }
     GIGAAM_MODEL_VALUES = list(GIGAAM_MODEL_LABELS.keys())
+    DICTATION_ENGINE_LABELS = {
+        "Русский (GigaAM)": "gigaam",
+        "English (Parakeet)": "parakeet",
+    }
+    DICTATION_ENGINE_VALUES = list(DICTATION_ENGINE_LABELS.keys())
     DICTATION_KEY_LABELS = {
         "F7": "f7",
         "F8": "f8",
@@ -119,6 +124,7 @@ class VoiceTranslatorApp:
         self.vad_label: Optional[ctk.CTkLabel] = None
         self.recording_status: Optional[ctk.CTkLabel] = None
         self.dictation_button: Optional[ctk.CTkButton] = None
+        self.dictation_engine_menu: Optional[ctk.CTkOptionMenu] = None
         self.dictation_key_menu: Optional[ctk.CTkOptionMenu] = None
         self.dictation_status: Optional[ctk.CTkLabel] = None
         # Устройства
@@ -433,6 +439,20 @@ class VoiceTranslatorApp:
             text_color=COLORS.text_primary,
         )
         self.dictation_button.pack(side="left")
+        engine_frame = ctk.CTkFrame(row, corner_radius=0, fg_color="transparent")
+        engine_frame.pack(side="left", padx=(SPACING.sm, 0))
+        ctk.CTkLabel(
+            engine_frame, text="Язык:",
+            font=get_font_tuple(FONTS.size_small),
+            text_color=COLORS.text_secondary,
+        ).pack(side="left", padx=(0, 4))
+        self.dictation_engine_menu = ctk.CTkOptionMenu(
+            engine_frame, values=self.DICTATION_ENGINE_VALUES,
+            command=self._on_dictation_engine_change,
+            width=145, font=get_font_tuple(FONTS.size_small),
+        )
+        self.dictation_engine_menu.set(self._dictation_engine_label_from_config())
+        self.dictation_engine_menu.pack(side="left")
         key_frame = ctk.CTkFrame(row, corner_radius=0, fg_color="transparent")
         key_frame.pack(side="left", padx=(SPACING.sm, 0))
         ctk.CTkLabel(
@@ -455,6 +475,7 @@ class VoiceTranslatorApp:
         self.dictation_status.pack(side="left", padx=(SPACING.sm, 0))
         if not DICTATION_AVAILABLE:
             self.dictation_button.configure(state="disabled")
+            self.dictation_engine_menu.configure(state="disabled")
             self.dictation_key_menu.configure(state="disabled")
             self.dictation_status.configure(
                 text="Диктовка недоступна: установите pynput/pyobjc",
@@ -966,6 +987,12 @@ class VoiceTranslatorApp:
                 return label
         return "F9"
 
+    def _dictation_engine_label_from_config(self) -> str:
+        for label, engine in self.DICTATION_ENGINE_LABELS.items():
+            if engine == getattr(self.config, "dictation_engine", "gigaam"):
+                return label
+        return self.DICTATION_ENGINE_VALUES[0]
+
     def _toggle_dictation(self):
         if self._dictation_active:
             self._stop_dictation()
@@ -999,8 +1026,11 @@ class VoiceTranslatorApp:
 
         dictation_key = str(getattr(self.config, "dictation_key", "f9") or "f9").strip().lower()
         dictation_mode = str(getattr(self.config, "dictation_mode", "hold") or "hold").strip().lower()
+        dictation_engine = str(getattr(self.config, "dictation_engine", "gigaam") or "gigaam").strip().lower()
         if dictation_mode not in {"hold", "toggle"}:
             dictation_mode = "hold"
+        if dictation_engine not in {"gigaam", "parakeet"}:
+            dictation_engine = "gigaam"
 
         # Передаём настройки двумя способами. Аргументы командной строки —
         # основной интерфейс dictation_main.py; переменные окружения оставлены
@@ -1008,6 +1038,7 @@ class VoiceTranslatorApp:
         env = os.environ.copy()
         env["DICTATION_KEY"] = dictation_key
         env["DICTATION_MODE"] = dictation_mode
+        env["DICTATION_ENGINE"] = dictation_engine
         try:
             self._dictation_proc = subprocess.Popen(
                 [
@@ -1018,6 +1049,8 @@ class VoiceTranslatorApp:
                     dictation_key,
                     "--mode",
                     dictation_mode,
+                    "--engine",
+                    dictation_engine,
                 ],
                 cwd=project_root,
                 stdout=subprocess.PIPE,
@@ -1044,6 +1077,8 @@ class VoiceTranslatorApp:
             fg_color=COLORS.accent_error,
         )
         self.dictation_key_menu.configure(state="disabled")
+        if self.dictation_engine_menu:
+            self.dictation_engine_menu.configure(state="disabled")
         if self.engine_menu:
             self.engine_menu.configure(state="disabled")
         if self.dictation_status:
@@ -1052,7 +1087,8 @@ class VoiceTranslatorApp:
                 text_color=COLORS.text_primary,
             )
         logger.info(
-            "Диктовка включена (клавиша %s/%s, режим %s, PID %s)",
+            "Диктовка включена (движок %s, клавиша %s/%s, режим %s, PID %s)",
+            dictation_engine,
             key_label,
             dictation_key,
             dictation_mode,
@@ -1084,6 +1120,8 @@ class VoiceTranslatorApp:
             )
         if self.dictation_key_menu:
             self.dictation_key_menu.configure(state="normal")
+        if self.dictation_engine_menu:
+            self.dictation_engine_menu.configure(state="normal")
         if self.engine_menu:
             self.engine_menu.configure(state="normal")
         if self.dictation_status:
@@ -1129,6 +1167,8 @@ class VoiceTranslatorApp:
             )
         if self.dictation_key_menu:
             self.dictation_key_menu.configure(state="normal")
+        if self.dictation_engine_menu:
+            self.dictation_engine_menu.configure(state="normal")
         if self.engine_menu:
             self.engine_menu.configure(state="normal")
         if self.dictation_status:
@@ -1154,6 +1194,14 @@ class VoiceTranslatorApp:
         self.config.dictation_key = spec
         self._save_config()
         logger.info("Клавиша диктовки изменена на %s", spec)
+
+    def _on_dictation_engine_change(self, label: str):
+        engine = self.DICTATION_ENGINE_LABELS.get(label, "gigaam")
+        if engine == getattr(self.config, "dictation_engine", "gigaam"):
+            return
+        self.config.dictation_engine = engine
+        self._save_config()
+        logger.info("Движок диктовки изменён на %s", engine)
 
     def _recognition_loop(self):
         """Основной цикл распознавания."""

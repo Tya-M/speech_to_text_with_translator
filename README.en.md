@@ -18,6 +18,8 @@ services or third-party APIs.
 - **Translation** of the recognized text.
 - **🎤 Dictation into cursor** — hold a hotkey, speak, and the text is typed
   wherever your cursor is (browser, editor, messenger, etc.).
+- Dictation can use **GigaAM (Russian)** or **Parakeet Unified EN (English)**;
+  Parakeet runs locally through `sherpa-onnx`.
 - **Graphical interface** with microphone, sensitivity and VAD-threshold settings,
   plus engine and model selection.
 - Configurable hotkey and dictation mode (hold / toggle).
@@ -58,6 +60,9 @@ pip install -r requirements.txt
 
 # 4. Install the GigaAM engine (for the best quality)
 pip install "gigaam @ git+https://github.com/salute-developers/GigaAM.git"
+
+# 5. Optional: install the English Parakeet engine
+pip install "sherpa-onnx==1.13.8" "sherpa-onnx-bin==1.13.8"
 ```
 
 > On first launch, the selected recognition model is downloaded automatically.
@@ -102,8 +107,8 @@ python dictation_main.py
 ## 🎤 How to use dictation into the cursor
 
 1. Launch the app and wait for the recognition engine to load.
-2. In the **“🎤 Dictation into cursor”** panel, click the button — it turns red (“ON”).
-3. If needed, choose a hotkey (F7–F12 or the right ⌥ Option key).
+2. In the **"🎤 Dictation into cursor"** panel, choose the language and engine.
+3. Choose a hotkey (F7–F12, right ⌥, or right ⌘), then click the button — it turns red ("ON").
 4. Place the cursor in the desired window, **hold** the hotkey, speak and release —
    the recognized text is typed wherever the cursor is.
 
@@ -125,6 +130,9 @@ Main parameters:
 | `device_index`     | Microphone index                                        | `7`             |
 | `dictation_key`    | Dictation hotkey                                        | `"f9"`          |
 | `dictation_mode`   | Mode: `hold` or `toggle`                                | `"hold"`        |
+| `dictation_engine` | Dictation engine: `gigaam` or `parakeet`               | `"gigaam"`      |
+| `parakeet_model_path` | Parakeet Unified EN model directory                  | `"sherpa-onnx-nemo-parakeet-unified-en-0.6b-int8-non-streaming"` |
+| `parakeet_num_threads` | Number of Parakeet CPU threads                       | `2`              |
 
 Settings can also be changed directly in the interface — they are saved automatically.
 

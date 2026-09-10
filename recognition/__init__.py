@@ -7,6 +7,7 @@ from .base import BaseRecognizer
 from .filters import HallucinationFilter
 from .vosk_engine import VoskRecognizer, VOSK_AVAILABLE
 from .gigaam_engine import GigaAMRecognizer, GIGAAM_AVAILABLE
+from .parakeet_engine import ParakeetRecognizer, SHERPA_AVAILABLE
 from utils.config import AppConfig, RecognitionConfig
 
 logger = logging.getLogger("voice_translator.recognition")
@@ -134,6 +135,8 @@ __all__ = [
     'VOSK_AVAILABLE',
     'GigaAMRecognizer',
     'GIGAAM_AVAILABLE',
+    'ParakeetRecognizer',
+    'SHERPA_AVAILABLE',
     'HallucinationFilter',
     'create_recognizer',
 ]

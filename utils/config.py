@@ -58,6 +58,11 @@ class AppConfig:
     # Глобальная диктовка «речь → текст под курсором»
     dictation_key: str = "f9"          # горячая клавиша (f7..f12, alt_r, cmd_r)
     dictation_mode: Literal["hold", "toggle"] = "hold"
+    dictation_engine: Literal["gigaam", "parakeet"] = "gigaam"
+
+    # Параметры английской диктовки Parakeet Unified EN
+    parakeet_model_path: str = "sherpa-onnx-nemo-parakeet-unified-en-0.6b-int8-non-streaming"
+    parakeet_num_threads: int = 2
     
     def __post_init__(self):
         """Валидация значений после инициализации."""
@@ -99,6 +104,20 @@ class AppConfig:
         self.dictation_mode = str(self.dictation_mode).strip().lower()
         if self.dictation_mode not in allowed_dictation_modes:
             self.dictation_mode = "hold"
+
+        self.dictation_engine = str(self.dictation_engine or "gigaam").strip().lower()
+        if self.dictation_engine not in {"gigaam", "parakeet"}:
+            self.dictation_engine = "gigaam"
+
+        self.parakeet_model_path = str(
+            self.parakeet_model_path
+            or "sherpa-onnx-nemo-parakeet-unified-en-0.6b-int8-non-streaming"
+        ).strip()
+        try:
+            self.parakeet_num_threads = int(self.parakeet_num_threads)
+        except Exception:
+            self.parakeet_num_threads = 2
+        self.parakeet_num_threads = max(1, min(8, self.parakeet_num_threads))
     
     @classmethod
     def load(cls, path: Optional[str] = None) -> "AppConfig":
