@@ -16,39 +16,6 @@ const COLORS = {
   border: '#3d3d54',
 };
 
-// Компонент Toggle для выбора движка
-const EngineToggle = ({ value, onChange }) => {
-  const options = ['Vosk (Быстро)', 'GigaAM (Точно)'];
-  
-  return (
-    <div className="relative flex bg-opacity-50 rounded-full p-1" style={{ backgroundColor: COLORS.bgTertiary }}>
-      <div
-        className="absolute h-8 rounded-full transition-all duration-300"
-        style={{
-          width: '50%',
-          backgroundColor: COLORS.accentPrimary,
-          left: value === 0 ? '2px' : '50%',
-          top: '2px',
-          bottom: '2px',
-        }}
-      />
-      {options.map((option, idx) => (
-        <button
-          key={idx}
-          onClick={() => onChange(idx)}
-          className="relative z-10 px-4 py-1.5 text-sm font-medium transition-colors"
-          style={{
-            color: value === idx ? COLORS.bgPrimary : COLORS.textSecondary,
-            width: '50%',
-          }}
-        >
-          {option}
-        </button>
-      ))}
-    </div>
-  );
-};
-
 // Компонент кнопки записи
 const RecordButton = ({ isRecording, onClick }) => {
   const [pulse, setPulse] = useState(0);
@@ -153,7 +120,6 @@ const TranscriptEntry = ({ entry }) => (
 
 // Главное приложение
 export default function VoiceTranslatorPreview() {
-  const [engine, setEngine] = useState(1);
   const [isRecording, setIsRecording] = useState(false);
   const [level, setLevel] = useState(0);
   const [sensitivity, setSensitivity] = useState(1000);
@@ -206,7 +172,9 @@ export default function VoiceTranslatorPreview() {
               <div className="text-xs mb-2" style={{ color: COLORS.textSecondary }}>
                 Движок распознавания:
               </div>
-              <EngineToggle value={engine} onChange={setEngine} />
+              <div className="px-3 py-2 rounded-lg text-sm" style={{ backgroundColor: COLORS.bgTertiary, color: COLORS.textPrimary }}>
+                GigaAM
+              </div>
             </div>
             
             <div>
@@ -307,9 +275,9 @@ export default function VoiceTranslatorPreview() {
         <div className="flex justify-between mt-4 text-xs" style={{ color: COLORS.textMuted }}>
           <div className="flex gap-4">
             <span style={{ color: COLORS.accentSuccess }}>
-              ● Движок: {engine === 0 ? 'Vosk' : 'GigaAM'}
+              ● Движок: GigaAM
             </span>
-            <span>Модель: {engine === 0 ? 'Russian 0.42' : 'v3 RNNT'}</span>
+            <span>Модель: v3 RNNT</span>
           </div>
           <div className="flex gap-4">
             <span>Кэш: 67%</span>

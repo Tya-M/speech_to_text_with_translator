@@ -5,16 +5,11 @@
 pyaudio>=0.2.14
 numpy>=1.21.0,<2.0.0
 
-# Speech Recognition - Vosk (fast, offline)
-vosk>=0.3.44
-
 # Speech Recognition - GigaAM (SberDevices, offline after first download)
 # GigaAM v3 (модели v3_e2e_ctc / v3_e2e_rnnt) требует установки из исходников GitHub
 # (версия на PyPI пока не содержит v3). Также нужен ffmpeg в PATH.
 #   pip install "gigaam @ git+https://github.com/salute-developers/GigaAM.git"
 # Зависимости PyTorch/torchaudio устанавливаются автоматически вместе с gigaam.
-# Приложение продолжает работать на Vosk, если gigaam не установлен.
-
 # Translation - Argos (offline)
 argostranslate>=1.9.0
 
@@ -27,10 +22,6 @@ customtkinter>=5.2.0
 # Optional: for building .app bundle
 # py2app>=0.28.0
 # pyinstaller>=6.0.0
-
-# Vosk Large Model (опционально, ~1.5GB):
-# wget https://alphacephei.com/vosk/models/vosk-model-ru-0.22.zip
-# unzip vosk-model-ru-0.22.zip -d models/
 
 pynput>=1.7.6
 pyobjc-framework-Quartz>=10.0

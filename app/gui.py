@@ -70,7 +70,7 @@ class VoiceTranslatorApp:
     """Главное приложение для распознавания русской речи и перевода."""
     TITLE = "Голосовой Переводчик"
     VERSION = "1.0.0"
-    ENGINE_LABELS = {"Vosk": "vosk", "GigaAM": "gigaam"}
+    ENGINE_LABELS = {"GigaAM": "gigaam"}
     ENGINE_VALUES = list(ENGINE_LABELS.keys())
     GIGAAM_MODEL_LABELS = {
         "v3 RNNT (точнее)": "v3_e2e_rnnt",
@@ -115,7 +115,6 @@ class VoiceTranslatorApp:
         self.record_button: Optional[RecordButton] = None
         self.engine_menu: Optional[ctk.CTkOptionMenu] = None
         self.gigaam_model_menu: Optional[ctk.CTkOptionMenu] = None
-        self.model_toggle: Optional[ctk.CTkSegmentedButton] = None
         self.status_bar: Optional[StatusBar] = None
         self.device_menu: Optional[ctk.CTkOptionMenu] = None
         self.sensitivity_slider: Optional[ctk.CTkSlider] = None
@@ -224,29 +223,6 @@ class VoiceTranslatorApp:
         )
         self.gigaam_model_menu.set(self._gigaam_model_label_from_config())
         self.gigaam_model_menu.pack(anchor="w", pady=(2, 0))
-        # Выбор модели Vosk
-        vosk_model_frame = ctk.CTkFrame(top_controls, corner_radius=0, fg_color="transparent")
-        vosk_model_frame.pack(side="left")
-
-        ctk.CTkLabel(
-            vosk_model_frame, text="Модель Vosk:",
-            font=get_font_tuple(FONTS.size_small),
-            text_color=COLORS.text_secondary
-        ).pack(anchor="w")
-        self.model_toggle = ctk.CTkSegmentedButton(
-            vosk_model_frame,
-            values=["Быстрая (0.42)", "Точная (0.22)"],
-            command=self._on_model_change,
-            font=get_font_tuple(FONTS.size_small),
-            selected_color="#1a5a7a",
-            selected_hover_color="#1a6a8a",
-            unselected_color="#1a1a2e",
-            unselected_hover_color="#252540"
-        )
-        # Устанавливаем начальное значение
-        initial_model = "Точная (0.22)" if self.config.vosk_model_size == "large" else "Быстрая (0.42)"
-        self.model_toggle.set(initial_model)
-        self.model_toggle.pack(anchor="w", pady=(2, 0))
         self._sync_engine_controls()
         # Выбор устройства (CTkOptionMenu)
         device_frame = ctk.CTkFrame(top_controls, corner_radius=0, fg_color="transparent")
@@ -650,7 +626,7 @@ class VoiceTranslatorApp:
         self.config.device_name = device.name
         logger.info(f"Восстановлено устройство: {device.name} (index={device.index})")
     def _engine_label_from_config(self) -> str:
-        return "GigaAM" if self.config.engine == "gigaam" else "Vosk"
+        return "GigaAM"
 
     def _gigaam_model_label_from_config(self) -> str:
         for label, model in self.GIGAAM_MODEL_LABELS.items():
@@ -662,37 +638,25 @@ class VoiceTranslatorApp:
         """Keeps selector states aligned with the selected engine."""
         if not self.engine_menu:
             return
-        is_gigaam = self.config.engine == "gigaam"
         self.engine_menu.set(self._engine_label_from_config())
         if self.gigaam_model_menu:
             self.gigaam_model_menu.set(self._gigaam_model_label_from_config())
-            self.gigaam_model_menu.configure(state="normal" if is_gigaam else "disabled")
-        if self.model_toggle:
-            model = "Точная (0.22)" if self.config.vosk_model_size == "large" else "Быстрая (0.42)"
-            self.model_toggle.set(model)
-            self.model_toggle.configure(state="disabled" if is_gigaam else "normal")
+            self.gigaam_model_menu.configure(state="normal")
     def _load_configured_recognizer(self):
         """Loads the configured recognizer through the shared factory."""
         rec_config = RecognitionConfig.from_app_config(self.config)
         return create_recognizer(self.config, rec_config)
     def _recognizer_engine_status(self, recognizer) -> str:
         class_name = recognizer.__class__.__name__
-        if class_name == "VoskRecognizer":
-            return "Vosk · CPU"
         if class_name == "GigaAMRecognizer":
             device = str(getattr(recognizer, "device", "cpu")).upper()
             return f"GigaAM · {device}"
         return getattr(recognizer, "_model_name", recognizer.name)
     def _recognizer_model_status(self, recognizer) -> str:
         class_name = recognizer.__class__.__name__
-        if class_name == "VoskRecognizer":
-            return "Russian 0.22" if self.config.vosk_model_size == "large" else "Russian 0.42"
         return str(getattr(recognizer, "model_name", getattr(recognizer, "_model_name", "—")))
     def _recognizer_matches_config(self, recognizer) -> bool:
-        expected_by_config = {
-            "vosk": "VoskRecognizer",
-            "gigaam": "GigaAMRecognizer",
-        }
+        expected_by_config = {"gigaam": "GigaAMRecognizer"}
         expected = expected_by_config.get(self.config.engine)
         return recognizer.__class__.__name__ == expected
     def _update_status(self):
@@ -1268,7 +1232,7 @@ class VoiceTranslatorApp:
             self._show_error("Внимание", "Выключите «Диктовку в курсор» перед сменой движка")
             self._sync_engine_controls()
             return
-        new_engine = self.ENGINE_LABELS.get(engine_label, "vosk")
+        new_engine = self.ENGINE_LABELS.get(engine_label, "gigaam")
         if new_engine == self.config.engine:
             return
 
@@ -1294,46 +1258,6 @@ class VoiceTranslatorApp:
         self.config.gigaam_model = new_model
         self._save_config()
         self._reload_recognizer(show_messages=True)
-    def _on_model_change(self, model_name: str):
-        """Обработчик смены модели Vosk."""
-        if self._is_recording:
-            self._show_error("Внимание", "Остановите запись перед сменой модели")
-            # Возвращаем предыдущее значение
-            prev_model = "Точная (0.22)" if self.config.vosk_model_size == "large" else "Быстрая (0.42)"
-            self.model_toggle.set(prev_model)
-            return
-        if self._dictation_active:
-            self._show_error("Внимание", "Выключите «Диктовку в курсор» перед сменой модели")
-            prev_model = "Точная (0.22)" if self.config.vosk_model_size == "large" else "Быстрая (0.42)"
-            self.model_toggle.set(prev_model)
-            return
-
-        # Определяем новый размер модели
-        new_size = "large" if "0.22" in model_name else "small"
-
-        if new_size == self.config.vosk_model_size:
-            return  # Модель не изменилась
-        # Проверяем наличие модели
-        from pathlib import Path
-        model_path = self.config.vosk_large_model_path if new_size == "large" else self.config.vosk_model_path
-        if not Path(model_path).exists():
-            self._show_error(
-                "Модель не найдена",
-                f"Модель не найдена: {model_path}\n\n"
-                f"Скачайте модель:\n"
-                f"wget https://alphacephei.com/vosk/models/vosk-model-ru-{'0.22' if new_size == 'large' else '0.42'}.zip\n"
-                f"unzip vosk-model-ru-{'0.22' if new_size == 'large' else '0.42'}.zip -d models/"
-            )
-            # Возвращаем предыдущее значение
-            prev_model = "Точная (0.22)" if self.config.vosk_model_size == "large" else "Быстрая (0.42)"
-            self.model_toggle.set(prev_model)
-            return
-        # Обновляем конфигурацию
-        self.config.vosk_model_size = new_size
-        self._save_config()
-
-        self._reload_recognizer(show_messages=True)
-
     def _reload_recognizer(self, show_messages: bool = False):
         """Перезагружает текущий распознаватель без блокировки Tk main loop."""
         if self.engine_manager.is_switching:
@@ -1388,9 +1312,6 @@ class VoiceTranslatorApp:
             )
             return
     def _configured_engine_summary(self) -> str:
-        if self.config.engine == "vosk":
-            model = "0.22" if self.config.vosk_model_size == "large" else "0.42"
-            return f"Vosk {model}"
         return f"GigaAM {self.config.gigaam_model}"
 
     def _save_config(self):

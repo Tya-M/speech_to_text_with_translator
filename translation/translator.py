@@ -109,7 +109,7 @@ class Translator:
         self._translation_fn = None
         self._is_loaded = False
         self._lock = threading.Lock()
-        # 1 worker для Intel i5 4-core — избегаем конкуренции с Vosk за CPU
+        # 1 worker для Intel i5 4-core — сохраняем стабильную нагрузку CPU
         self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="Translator")
     
     def load(self) -> bool:

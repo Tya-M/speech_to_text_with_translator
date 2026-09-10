@@ -5,7 +5,6 @@ from typing import Callable, Optional
 
 from .base import BaseRecognizer
 from .filters import HallucinationFilter
-from .vosk_engine import VoskRecognizer, VOSK_AVAILABLE
 from .gigaam_engine import GigaAMRecognizer, GIGAAM_AVAILABLE
 from .parakeet_engine import ParakeetRecognizer, SHERPA_AVAILABLE
 from utils.config import AppConfig, RecognitionConfig
@@ -15,9 +14,7 @@ logger = logging.getLogger("voice_translator.recognition")
 
 def create_recognizer(config: AppConfig, rec_config: RecognitionConfig) -> Optional[BaseRecognizer]:
     """
-    Creates and loads the requested recognizer, falling back to the other engine.
-
-    Fallback order after the requested engine fails: GigaAM -> Vosk.
+    Creates and loads the configured GigaAM recognizer.
     """
     attempted: set[str] = set()
 
@@ -53,19 +50,13 @@ def _recognizer_candidates(
     rec_config: RecognitionConfig,
 ) -> list[tuple[str, Callable[[], BaseRecognizer]]]:
     requested = _requested_candidates(config, rec_config)
-    fallbacks = [
-        _gigaam_candidate(config, rec_config),
-        _vosk_candidate(config, rec_config),
-    ]
-    return requested + fallbacks
+    return requested
 
 
 def _requested_candidates(
     config: AppConfig,
     rec_config: RecognitionConfig,
 ) -> list[tuple[str, Callable[[], BaseRecognizer]]]:
-    if config.engine == "vosk":
-        return [_vosk_candidate(config, rec_config)]
     if config.engine == "gigaam":
         return [_gigaam_candidate(config, rec_config)]
 
@@ -74,8 +65,6 @@ def _requested_candidates(
 
 
 def _requested_label(config: AppConfig) -> str:
-    if config.engine == "vosk":
-        return "vosk"
     if config.engine == "gigaam":
         return "gigaam"
     return "unknown"
@@ -96,21 +85,6 @@ def _gigaam_candidate(
     )
 
 
-def _vosk_candidate(
-    config: AppConfig,
-    rec_config: RecognitionConfig,
-) -> tuple[str, Callable[[], BaseRecognizer]]:
-    model_path = config.vosk_large_model_path if config.vosk_model_size == "large" else config.vosk_model_path
-    return (
-        "vosk",
-        lambda: VoskRecognizer(
-            rec_config,
-            model_path=model_path,
-            phrase_timeout=config.vosk_phrase_timeout,
-        ),
-    )
-
-
 def _build_recognizer(
     label: str,
     factory: Callable[[], BaseRecognizer],
@@ -118,10 +92,6 @@ def _build_recognizer(
     if label == "gigaam" and not GIGAAM_AVAILABLE:
         logger.warning("GigaAM is unavailable, trying fallback")
         return None
-    if label == "vosk" and not VOSK_AVAILABLE:
-        logger.warning("Vosk is unavailable")
-        return None
-
     try:
         return factory()
     except Exception as e:
@@ -131,8 +101,6 @@ def _build_recognizer(
 
 __all__ = [
     'BaseRecognizer',
-    'VoskRecognizer',
-    'VOSK_AVAILABLE',
     'GigaAMRecognizer',
     'GIGAAM_AVAILABLE',
     'ParakeetRecognizer',

@@ -16,7 +16,7 @@ class TestConfig:
     def test_config_defaults(self):
         from utils.config import AppConfig
         config = AppConfig()
-        assert config.engine in ["vosk", "gigaam"]
+        assert config.engine == "gigaam"
         assert config.gigaam_model in ["v3_e2e_ctc", "v3_e2e_rnnt"]
         assert 100 <= config.sensitivity <= 2000
     

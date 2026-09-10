@@ -12,9 +12,7 @@ services or third-party APIs.
 
 ## ✨ Features
 
-- **Offline speech recognition** with a choice of two engines:
-  - **GigaAM** — high-quality Russian recognition (recommended);
-  - **Vosk** — lightweight and fast option.
+- **Offline Russian speech recognition** through **GigaAM**.
 - **Translation** of the recognized text.
 - **🎤 Dictation into cursor** — hold a hotkey, speak, and the text is typed
   wherever your cursor is (browser, editor, messenger, etc.).
@@ -37,7 +35,7 @@ services or third-party APIs.
 - Python dependencies are listed in [`requirements.txt`](requirements.txt), including:
   - `customtkinter` — graphical interface;
   - `pyaudio` — microphone audio capture;
-  - `vosk` — the Vosk engine;
+  - `gigaam` — the Russian speech recognition engine;
   - `pynput`, `pyobjc-framework-Quartz`, `pyobjc-framework-Cocoa` — typing into the
     cursor and handling global hotkeys on macOS.
 
@@ -123,7 +121,7 @@ Main parameters:
 
 | Parameter          | Purpose                                                 | Example         |
 |--------------------|---------------------------------------------------------|-----------------|
-| `engine`           | Recognition engine: `gigaam` or `vosk`                  | `"gigaam"`      |
+| `engine`           | Recognition engine: `gigaam`                            | `"gigaam"`      |
 | `gigaam_model`     | GigaAM model                                            | `"v3_e2e_rnnt"` |
 | `vad_threshold`    | Speech-detection threshold (silence/voice)              | `700`           |
 | `sample_rate`      | Sample rate, Hz                                         | `16000`         |
@@ -144,7 +142,7 @@ Settings can also be changed directly in the interface — they are saved automa
 .
 ├── app/               # Graphical interface (customtkinter)
 ├── audio/             # Microphone audio capture
-├── recognition/       # Recognition engines (GigaAM, Vosk) + VAD
+├── recognition/       # Recognition engines GigaAM and Parakeet + VAD
 ├── translation/       # Text translation
 ├── input_injection/   # Typing into the cursor and the dictation service
 ├── utils/             # Configuration, logging, helpers
@@ -176,7 +174,6 @@ This project is distributed under the **MIT License** — see the [LICENSE](LICE
 ### Third-party component licenses
 The application uses third-party software under its own licenses:
 - **GigaAM** — MIT (© GigaChat Team)
-- **Vosk** — Apache License 2.0
 - **Argos Translate** — MIT / CC0
 - **pynput** — LGPL-3.0
 - **PyTorch**, **customtkinter**, **PyAudio**, etc. — see their repositories

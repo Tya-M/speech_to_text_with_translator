@@ -58,8 +58,11 @@ def main():
     try:
         # Загружаем конфигурацию
         config = AppConfig.load()
-        model_name = config.gigaam_model if config.engine == "gigaam" else config.vosk_model_size
-        logger.info(f"Конфигурация загружена: engine={config.engine}, model={model_name}")
+        logger.info(
+            "Конфигурация загружена: engine=%s, model=%s",
+            config.engine,
+            config.gigaam_model,
+        )
 
         # Создаём и запускаем приложение
         app = VoiceTranslatorApp(config)

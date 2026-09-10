@@ -21,16 +21,12 @@ class AppConfig:
     """Конфигурация приложения с валидацией."""
 
     # Движок распознавания
-    engine: Literal["vosk", "gigaam"] = "gigaam"
+    engine: Literal["gigaam"] = "gigaam"
 
     # Параметры GigaAM (SberDevices)
     gigaam_model: Literal["v3_e2e_ctc", "v3_e2e_rnnt"] = "v3_e2e_rnnt"
     gigaam_device: Literal["auto", "cpu", "cuda"] = "cpu"
     gigaam_language: str = "ru"
-
-    # Параметры Vosk
-    vosk_model_size: Literal["small", "large"] = "small"  # small=0.42, large=0.22
-    vosk_phrase_timeout: float = 1.5  # Секунды тишины до финализации фразы
 
     # Параметры аудио
     sensitivity: int = 1000  # 100-2000
@@ -44,10 +40,6 @@ class AppConfig:
     font_size: int = 14
     window_width: int = 900
     window_height: int = 450
-
-    # Пути к моделям
-    vosk_model_path: str = "models/vosk-model-ru"
-    vosk_large_model_path: str = "models/vosk-model-ru-0.22"
 
     # Кэш переводов
     translation_cache_size: int = 100
@@ -71,7 +63,7 @@ class AppConfig:
         self.font_size = max(10, min(24, self.font_size))
         self.chunk_duration = max(1.0, min(10.0, self.chunk_duration))
 
-        allowed_engines = {"vosk", "gigaam"}
+        allowed_engines = {"gigaam"}
         self.engine = str(self.engine).strip().lower()
         if self.engine not in allowed_engines:
             logger.warning("Неизвестный движок '%s', используем gigaam", self.engine)

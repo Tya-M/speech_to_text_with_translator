@@ -1,6 +1,6 @@
 """Parakeet Unified English recognizer through sherpa-onnx.
 
-The model is optional. The application keeps working with GigaAM/Vosk when
+The model is optional. The application keeps working with GigaAM when
 ``sherpa_onnx`` or the local Parakeet model is not installed.
 """
 
