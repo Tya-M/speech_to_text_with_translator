@@ -17,13 +17,11 @@ import subprocess
 from datetime import datetime
 from typing import Optional, List
 from pathlib import Path
-
 try:
     import psutil
     PSUTIL_AVAILABLE = True
 except ImportError:
     PSUTIL_AVAILABLE = False
-
 from .styles import COLORS, FONTS, SPACING, get_font_tuple
 from .components import RecordButton, LevelMeter, StatusBar
 from utils.config import AppConfig, RecognitionConfig
@@ -34,7 +32,6 @@ from utils.threading_utils import (
 from audio.capture import AudioCapture, AudioDevice
 from recognition import create_recognizer
 from translation import Translator, ARGOS_AVAILABLE
-
 # Глобальная диктовка «речь → текст под курсором». Импорт защищён: если не
 # установлены pynput/pyobjc, приложение всё равно запустится (кнопка будет
 # недоступна).
@@ -48,7 +45,6 @@ except Exception as _dict_err:  # pragma: no cover
     _DICTATION_IMPORT_ERROR = str(_dict_err)
 
 logger = logging.getLogger("voice_translator.app.gui")
-
 # CustomTkinter настройки
 ctk.set_appearance_mode("Dark")
 ctk.set_default_color_theme("blue")
@@ -61,7 +57,6 @@ class TranscriptEntry:
         self.original = original
         self.translated = translated
         self.timestamp = timestamp or time.time()
-
     def to_dict(self) -> dict:
         return {
             "original": self.original,
@@ -73,7 +68,6 @@ class TranscriptEntry:
 
 class VoiceTranslatorApp:
     """Главное приложение для распознавания русской речи и перевода."""
-
     TITLE = "Голосовой Переводчик"
     VERSION = "1.0.0"
     ENGINE_LABELS = {"Vosk": "vosk", "GigaAM": "gigaam"}
@@ -88,11 +82,12 @@ class VoiceTranslatorApp:
         "F8": "f8",
         "F9": "f9",
         "F10": "f10",
+        "F11": "f11",
         "F12": "f12",
         "Правый ⌥": "alt_r",
+        "Правый ⌘": "cmd_r",
     }
     DICTATION_KEY_VALUES = list(DICTATION_KEY_LABELS.keys())
-
     def __init__(self, config: AppConfig):
         self.config = config
         self.root: Optional[ctk.CTk] = None
@@ -106,11 +101,9 @@ class VoiceTranslatorApp:
         self.audio_capture: Optional[AudioCapture] = None
         self.translator: Optional[Translator] = None
         self.current_recognizer = None
-
         # Потоки
         self.recognition_thread: Optional[StoppableThread] = None
         self.init_thread: Optional[threading.Thread] = None
-
         # UI элементы
         self.text_area: Optional[tk.Text] = None
         self.level_meter: Optional[LevelMeter] = None
@@ -128,11 +121,9 @@ class VoiceTranslatorApp:
         self.dictation_button: Optional[ctk.CTkButton] = None
         self.dictation_key_menu: Optional[ctk.CTkOptionMenu] = None
         self.dictation_status: Optional[ctk.CTkLabel] = None
-
         # Устройства
         self.audio_devices: List[AudioDevice] = []
         self._device_names: List[str] = ["Загрузка..."]
-
         # Флаги
         self._is_recording = False
         # Глобальная диктовка «речь → текст под курсором».
@@ -150,7 +141,6 @@ class VoiceTranslatorApp:
         # Для Intel i5 4-core: 150ms чтобы разгрузить CPU от частых GUI-обновлений
         self._partial_throttle_ms: int = getattr(self.config, "partial_throttle_ms", 150)
         logger.info(f"Partial throttle: {self._partial_throttle_ms} ms")
-
     def run(self):
         """Запускает приложение."""
         self._create_window()
@@ -161,7 +151,6 @@ class VoiceTranslatorApp:
 
         logger.info("Приложение запущено")
         self.root.mainloop()
-
     def _create_window(self):
         """Создаёт главное окно."""
         self.root = ctk.CTk()
@@ -170,7 +159,6 @@ class VoiceTranslatorApp:
         self.root.minsize(500, 550)
 
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
-
     def _create_ui(self):
         """Создаёт UI."""
         main_frame = ctk.CTkFrame(self.root, corner_radius=0, fg_color="transparent")
@@ -183,7 +171,6 @@ class VoiceTranslatorApp:
         # Заголовок
         header = ctk.CTkFrame(main_frame, corner_radius=0, fg_color="transparent")
         header.pack(fill="x", pady=(0, SPACING.xs))
-
         title_label = ctk.CTkLabel(
             header, text=self.TITLE,
             font=get_font_tuple(FONTS.size_xlarge, FONTS.weight_bold),
@@ -194,20 +181,17 @@ class VoiceTranslatorApp:
         # Панель управления
         control_panel = ctk.CTkFrame(main_frame, corner_radius=SPACING.ctk_corner_radius)
         control_panel.pack(fill="x", pady=(0, SPACING.xs), padx=0)
-
         top_controls = ctk.CTkFrame(control_panel, corner_radius=0, fg_color="transparent")
         top_controls.pack(fill="x", padx=SPACING.sm, pady=(SPACING.xs, 2))
 
         # Выбор движка
         engine_frame = ctk.CTkFrame(top_controls, corner_radius=0, fg_color="transparent")
         engine_frame.pack(side="left", padx=(0, SPACING.sm))
-
         ctk.CTkLabel(
             engine_frame, text="Движок:",
             font=get_font_tuple(FONTS.size_small),
             text_color=COLORS.text_secondary
         ).pack(anchor="w")
-
         self.engine_menu = ctk.CTkOptionMenu(
             engine_frame,
             values=self.ENGINE_VALUES,
@@ -217,7 +201,6 @@ class VoiceTranslatorApp:
         )
         self.engine_menu.set(self._engine_label_from_config())
         self.engine_menu.pack(anchor="w", pady=(2, 0))
-
         gigaam_model_frame = ctk.CTkFrame(top_controls, corner_radius=0, fg_color="transparent")
         gigaam_model_frame.pack(side="left", padx=(0, SPACING.sm))
 
@@ -226,7 +209,6 @@ class VoiceTranslatorApp:
             font=get_font_tuple(FONTS.size_small),
             text_color=COLORS.text_secondary
         ).pack(anchor="w")
-
         self.gigaam_model_menu = ctk.CTkOptionMenu(
             gigaam_model_frame,
             values=self.GIGAAM_MODEL_VALUES,
@@ -236,7 +218,6 @@ class VoiceTranslatorApp:
         )
         self.gigaam_model_menu.set(self._gigaam_model_label_from_config())
         self.gigaam_model_menu.pack(anchor="w", pady=(2, 0))
-
         # Выбор модели Vosk
         vosk_model_frame = ctk.CTkFrame(top_controls, corner_radius=0, fg_color="transparent")
         vosk_model_frame.pack(side="left")
@@ -246,7 +227,6 @@ class VoiceTranslatorApp:
             font=get_font_tuple(FONTS.size_small),
             text_color=COLORS.text_secondary
         ).pack(anchor="w")
-
         self.model_toggle = ctk.CTkSegmentedButton(
             vosk_model_frame,
             values=["Быстрая (0.42)", "Точная (0.22)"],
@@ -262,7 +242,6 @@ class VoiceTranslatorApp:
         self.model_toggle.set(initial_model)
         self.model_toggle.pack(anchor="w", pady=(2, 0))
         self._sync_engine_controls()
-
         # Выбор устройства (CTkOptionMenu)
         device_frame = ctk.CTkFrame(top_controls, corner_radius=0, fg_color="transparent")
         device_frame.pack(side="right")
@@ -272,7 +251,6 @@ class VoiceTranslatorApp:
             font=get_font_tuple(FONTS.size_small),
             text_color=COLORS.text_secondary
         ).pack(anchor="w")
-
         self.device_menu = ctk.CTkOptionMenu(
             device_frame,
             values=self._device_names,
@@ -285,14 +263,12 @@ class VoiceTranslatorApp:
         # Слайдеры
         bottom_controls = ctk.CTkFrame(control_panel, corner_radius=0, fg_color="transparent")
         bottom_controls.pack(fill="x", padx=SPACING.sm, pady=(0, SPACING.xs))
-
         # Слайдер чувствительности
         sensitivity_frame = ctk.CTkFrame(bottom_controls, corner_radius=0, fg_color="transparent")
         sensitivity_frame.pack(side="left", fill="x", expand=True, padx=(0, SPACING.md))
 
         sens_header = ctk.CTkFrame(sensitivity_frame, corner_radius=0, fg_color="transparent")
         sens_header.pack(fill="x")
-
         ctk.CTkLabel(
             sens_header, text="Чувствительность микрофона:",
             font=get_font_tuple(FONTS.size_small),
@@ -306,7 +282,6 @@ class VoiceTranslatorApp:
             width=50
         )
         self.sensitivity_label.pack(side="right")
-
         self.sensitivity_slider = ctk.CTkSlider(
             sensitivity_frame,
             from_=100, to=2000,
@@ -319,7 +294,6 @@ class VoiceTranslatorApp:
         # Слайдер VAD
         vad_frame = ctk.CTkFrame(bottom_controls, corner_radius=0, fg_color="transparent")
         vad_frame.pack(side="right", fill="x", expand=True)
-
         vad_header = ctk.CTkFrame(vad_frame, corner_radius=0, fg_color="transparent")
         vad_header.pack(fill="x")
 
@@ -328,7 +302,6 @@ class VoiceTranslatorApp:
             font=get_font_tuple(FONTS.size_small),
             text_color=COLORS.text_secondary
         ).pack(side="left")
-
         self.vad_label = ctk.CTkLabel(
             vad_header, text=str(self.config.vad_threshold),
             font=get_font_tuple(FONTS.size_small),
@@ -336,7 +309,6 @@ class VoiceTranslatorApp:
             width=50
         )
         self.vad_label.pack(side="right")
-
         self.vad_slider = ctk.CTkSlider(
             vad_frame,
             from_=200, to=1000,
@@ -348,7 +320,6 @@ class VoiceTranslatorApp:
 
         # Панель глобальной диктовки «речь → текст под курсором»
         self._create_dictation_panel(main_frame)
-
         # Центральная панель
         center_panel = ctk.CTkFrame(main_frame, corner_radius=0, fg_color="transparent", border_width=0)
         center_panel.pack(fill="x", pady=(0, SPACING.xs))
@@ -356,13 +327,11 @@ class VoiceTranslatorApp:
         # Контейнер для кнопки записи
         record_container = ctk.CTkFrame(center_panel, corner_radius=0, fg_color="transparent", border_width=0)
         record_container.pack(side="left", padx=(0, SPACING.sm), pady=0, anchor="n")
-
         self.record_button = RecordButton(record_container, command=self._on_record_toggle, size=34)
         self.record_button.pack(pady=0)
 
         meter_frame = ctk.CTkFrame(center_panel, corner_radius=0, fg_color="transparent", border_width=0)
         meter_frame.pack(side="left", fill="x", expand=True, pady=0, anchor="n")
-
         self.recording_status = ctk.CTkLabel(
             meter_frame, text="Нажмите кнопку для начала записи",
             font=get_font_tuple(FONTS.size_small),
@@ -372,11 +341,9 @@ class VoiceTranslatorApp:
 
         self.level_meter = LevelMeter(meter_frame, width=360, height=12)
         self.level_meter.pack(anchor="w", pady=0)
-
         # Кнопки копирования
         export_frame = ctk.CTkFrame(center_panel, corner_radius=0, fg_color="transparent", border_width=0)
         export_frame.pack(side="right", pady=0, anchor="n")
-
         ctk.CTkButton(
             export_frame, text="Копировать RU",
             command=self._copy_russian,
@@ -387,7 +354,6 @@ class VoiceTranslatorApp:
             hover_color=COLORS.button_hover,
             text_color=COLORS.text_primary
         ).pack(side="left", padx=1, pady=0, anchor="n")
-
         ctk.CTkButton(
             export_frame, text="Копировать EN",
             command=self._copy_english,
@@ -398,20 +364,17 @@ class VoiceTranslatorApp:
             hover_color=COLORS.button_hover,
             text_color=COLORS.accent_primary
         ).pack(side="left", padx=1, pady=0, anchor="n")
-
         # Область текста - используем CTkFrame как контейнер + tk.Text для tag поддержки
         text_frame = ctk.CTkFrame(main_frame, corner_radius=SPACING.ctk_corner_radius, border_width=0)
         text_frame.pack(fill="both", expand=True, pady=0)
 
         text_header = ctk.CTkFrame(text_frame, corner_radius=0, fg_color="transparent")
         text_header.pack(fill="x", padx=SPACING.sm, pady=(SPACING.xs, SPACING.xs))
-
         ctk.CTkLabel(
             text_header, text="Транскрипция и перевод",
             font=get_font_tuple(FONTS.size_normal, FONTS.weight_bold),
             text_color=COLORS.text_primary
         ).pack(side="left")
-
         ctk.CTkButton(
             text_header, text="Очистить",
             command=self._clear_transcript,
@@ -422,15 +385,13 @@ class VoiceTranslatorApp:
             hover_color=COLORS.button_hover,
             text_color=COLORS.text_secondary
         ).pack(side="right")
-
-        # Контейнер для текстовой област�� (tk.Text для поддержки tag_config)
+        # Контейнер для текстовой области (tk.Text для поддержки tag_config)
         text_container = ctk.CTkFrame(text_frame, corner_radius=0, fg_color=COLORS.bg_tertiary)
         text_container.pack(fill="both", expand=True, padx=SPACING.sm, pady=(0, SPACING.xs))
 
         # Scrollbar
         scrollbar = ctk.CTkScrollbar(text_container)
         scrollbar.pack(side="right", fill="y")
-
         # tk.Text для поддержки tag_configure и tag_add
         self.text_area = tk.Text(
             text_container, font=get_font_tuple(self.config.font_size),
@@ -446,10 +407,8 @@ class VoiceTranslatorApp:
         )
         self.text_area.pack(fill="both", expand=True)
         scrollbar.configure(command=self.text_area.yview)
-
         # Контекстное меню для редактирования
         self._create_context_menu()
-
         # Теги форматирования
         self.text_area.tag_configure("timestamp", foreground=COLORS.text_muted,
                                      font=get_font_tuple(FONTS.size_small))
@@ -458,7 +417,6 @@ class VoiceTranslatorApp:
                                      lmargin1=30, lmargin2=30)
         self.text_area.tag_configure("partial", foreground=COLORS.text_secondary,
                                      font=get_font_tuple(self.config.font_size, "italic"))
-
     def _create_dictation_panel(self, parent):
         """Панель «Диктовка в курсор»: печать распознанной речи в любом окне."""
         panel = ctk.CTkFrame(parent, corner_radius=SPACING.ctk_corner_radius)
@@ -466,7 +424,6 @@ class VoiceTranslatorApp:
 
         row = ctk.CTkFrame(panel, corner_radius=0, fg_color="transparent")
         row.pack(fill="x", padx=SPACING.sm, pady=SPACING.xs)
-
         self.dictation_button = ctk.CTkButton(
             row, text="🎤 Диктовка в курсор: ВЫКЛ",
             command=self._toggle_dictation,
@@ -476,7 +433,6 @@ class VoiceTranslatorApp:
             text_color=COLORS.text_primary,
         )
         self.dictation_button.pack(side="left")
-
         key_frame = ctk.CTkFrame(row, corner_radius=0, fg_color="transparent")
         key_frame.pack(side="left", padx=(SPACING.sm, 0))
         ctk.CTkLabel(
@@ -487,18 +443,16 @@ class VoiceTranslatorApp:
         self.dictation_key_menu = ctk.CTkOptionMenu(
             key_frame, values=self.DICTATION_KEY_VALUES,
             command=self._on_dictation_key_change,
-            width=100, font=get_font_tuple(FONTS.size_small),
+            width=120, font=get_font_tuple(FONTS.size_small),
         )
         self.dictation_key_menu.set(self._dictation_key_label_from_config())
         self.dictation_key_menu.pack(side="left")
-
         self.dictation_status = ctk.CTkLabel(
             row, text="Офлайн-диктовка выключена",
             font=get_font_tuple(FONTS.size_small),
             text_color=COLORS.text_secondary,
         )
         self.dictation_status.pack(side="left", padx=(SPACING.sm, 0))
-
         if not DICTATION_AVAILABLE:
             self.dictation_button.configure(state="disabled")
             self.dictation_key_menu.configure(state="disabled")
@@ -506,7 +460,6 @@ class VoiceTranslatorApp:
                 text="Диктовка недоступна: установите pynput/pyobjc",
                 text_color=COLORS.accent_warning,
             )
-
     def _create_context_menu(self):
         """Создаёт контекстное меню для текстовой области."""
         self.context_menu = tk.Menu(self.root, tearoff=0,
@@ -530,13 +483,11 @@ class VoiceTranslatorApp:
         self.context_menu.add_separator()
         self.context_menu.add_command(label="Скопировать 🇷🇺 русский", command=self._copy_russian)
         self.context_menu.add_command(label="Скопировать 🇺🇸 английский", command=self._copy_english)
-
         # Привязка контекстного меню
         self.text_area.bind("<Button-2>", self._show_context_menu)  # Middle click
         self.text_area.bind("<Control-Button-1>", self._show_context_menu)  # Ctrl+click (macOS)
         if self.root.tk.call('tk', 'windowingsystem') == 'aqua':
             self.text_area.bind("<Button-3>", self._show_context_menu)  # Right click
-
     def _show_context_menu(self, event):
         """Показывает контекстное меню."""
         try:
@@ -551,7 +502,6 @@ class VoiceTranslatorApp:
             self.text_area.delete("sel.first", "sel.last")
         except tk.TclError:
             pass
-
     def _paste_text(self):
         """Вставляет текст из буфера обмена."""
         try:
@@ -568,7 +518,6 @@ class VoiceTranslatorApp:
         """Выделяет весь текст."""
         self.text_area.tag_add("sel", "1.0", "end")
         return "break"
-
     def _undo(self):
         """Отменяет последнее действие."""
         try:
@@ -582,7 +531,6 @@ class VoiceTranslatorApp:
             self.text_area.edit_redo()
         except tk.TclError:
             pass
-
     def _setup_bindings(self):
         """Настраивает горячие клавиши."""
         self.root.bind("<Command-r>", lambda e: self._toggle_recording())
@@ -593,7 +541,6 @@ class VoiceTranslatorApp:
         self.text_area.bind("<Command-a>", lambda e: self._select_all())
         self.text_area.bind("<Command-z>", lambda e: self._undo())
         self.text_area.bind("<Command-Shift-z>", lambda e: self._redo())
-
     def _start_init_thread(self):
         """Запускает фоновую инициализацию."""
         self.init_thread = threading.Thread(target=self._init_components, name="InitThread", daemon=True)
@@ -603,7 +550,6 @@ class VoiceTranslatorApp:
         """Инициализирует аудио, распознаватели и переводчик."""
         logger.info("Инициализация компонентов...")
         self.engine_manager.state = EngineState.LOADING
-
         # Аудио
         try:
             self.audio_capture = AudioCapture(
@@ -612,7 +558,6 @@ class VoiceTranslatorApp:
             )
             self.audio_capture.__enter__()
             self.audio_capture.set_level_callback(self._on_audio_level)
-
             self.audio_devices = self.audio_capture.get_input_devices()
             self.root.after(0, self._update_device_list)
             logger.info(f"Аудио инициализировано, {len(self.audio_devices)} устройств")
@@ -620,7 +565,6 @@ class VoiceTranslatorApp:
             logger.error(f"Ошибка инициализации аудио: {e}")
             self.root.after(0, lambda: self._show_error("Ошибка", f"Микрофон: {e}"))
             return
-
         # Распознаватель
         try:
             self.current_recognizer = self._load_configured_recognizer()
@@ -631,7 +575,6 @@ class VoiceTranslatorApp:
         except Exception as e:
             logger.error(f"Ошибка загрузки распознавателя: {e}")
             self.current_recognizer = None
-
         # Переводчик
         if ARGOS_AVAILABLE:
             try:
@@ -643,40 +586,48 @@ class VoiceTranslatorApp:
             except Exception as e:
                 logger.error(f"Ошибка загрузки переводчика: {e}")
                 self.translator = None
-
         self.engine_manager.state = EngineState.READY if self.current_recognizer else EngineState.ERROR
         self.root.after(0, self._update_status)
         logger.info("Инициализация завершена")
 
     def _update_device_list(self):
-        """Обновляет список устройств."""
+        """Обновляет список устройств и корректно восстанавливает PyAudio device.index."""
         self._device_names = [d.name for d in self.audio_devices]
-        if self._device_names:
-            self.device_menu.configure(values=self._device_names)
+        if not self._device_names:
+            return
 
-            # Ищем устройство по сохранённому имени
-            idx = 0
-            if self.config.device_name:
-                for i, device in enumerate(self.audio_devices):
-                    if device.name == self.config.device_name:
-                        idx = i
-                        break
-                else:
-                    # Если не нашли по имени, используем device_index
-                    idx = min(self.config.device_index, len(self.audio_devices) - 1)
-            else:
-                idx = min(self.config.device_index, len(self.audio_devices) - 1)
+        self.device_menu.configure(values=self._device_names)
 
-            self.device_menu.set(self._device_names[idx])
+        # Сначала восстанавливаем устройство по сохранённому имени. Если имя
+        # отсутствует/изменилось, ищем по реальному PyAudio device.index.
+        # Важно: device.index не равен позиции устройства в отфильтрованном
+        # self.audio_devices.
+        selected_pos: Optional[int] = None
 
-            # Устанавливаем устройство в audio_capture
-            if self.audio_capture and idx < len(self.audio_devices):
-                device = self.audio_devices[idx]
-                self.audio_capture.set_device(device.index)
-                self.config.device_index = device.index
-                self.config.device_name = device.name
-                logger.info(f"Восстановлено устройство: {device.name}")
+        if self.config.device_name:
+            for pos, device in enumerate(self.audio_devices):
+                if device.name == self.config.device_name:
+                    selected_pos = pos
+                    break
 
+        if selected_pos is None:
+            for pos, device in enumerate(self.audio_devices):
+                if device.index == self.config.device_index:
+                    selected_pos = pos
+                    break
+
+        if selected_pos is None:
+            selected_pos = 0
+
+        device = self.audio_devices[selected_pos]
+        self.device_menu.set(device.name)
+
+        if self.audio_capture:
+            self.audio_capture.set_device(device.index)
+
+        self.config.device_index = device.index
+        self.config.device_name = device.name
+        logger.info(f"Восстановлено устройство: {device.name} (index={device.index})")
     def _engine_label_from_config(self) -> str:
         return "GigaAM" if self.config.engine == "gigaam" else "Vosk"
 
@@ -690,7 +641,6 @@ class VoiceTranslatorApp:
         """Keeps selector states aligned with the selected engine."""
         if not self.engine_menu:
             return
-
         is_gigaam = self.config.engine == "gigaam"
         self.engine_menu.set(self._engine_label_from_config())
         if self.gigaam_model_menu:
@@ -700,12 +650,10 @@ class VoiceTranslatorApp:
             model = "Точная (0.22)" if self.config.vosk_model_size == "large" else "Быстрая (0.42)"
             self.model_toggle.set(model)
             self.model_toggle.configure(state="disabled" if is_gigaam else "normal")
-
     def _load_configured_recognizer(self):
         """Loads the configured recognizer through the shared factory."""
         rec_config = RecognitionConfig.from_app_config(self.config)
         return create_recognizer(self.config, rec_config)
-
     def _recognizer_engine_status(self, recognizer) -> str:
         class_name = recognizer.__class__.__name__
         if class_name == "VoskRecognizer":
@@ -714,13 +662,11 @@ class VoiceTranslatorApp:
             device = str(getattr(recognizer, "device", "cpu")).upper()
             return f"GigaAM · {device}"
         return getattr(recognizer, "_model_name", recognizer.name)
-
     def _recognizer_model_status(self, recognizer) -> str:
         class_name = recognizer.__class__.__name__
         if class_name == "VoskRecognizer":
             return "Russian 0.22" if self.config.vosk_model_size == "large" else "Russian 0.42"
         return str(getattr(recognizer, "model_name", getattr(recognizer, "_model_name", "—")))
-
     def _recognizer_matches_config(self, recognizer) -> bool:
         expected_by_config = {
             "vosk": "VoskRecognizer",
@@ -728,7 +674,6 @@ class VoiceTranslatorApp:
         }
         expected = expected_by_config.get(self.config.engine)
         return recognizer.__class__.__name__ == expected
-
     def _update_status(self):
         """Обновляет статус бар."""
         self._sync_engine_controls()
@@ -738,12 +683,10 @@ class VoiceTranslatorApp:
         else:
             self.status_bar.set_engine("Не загружен", ready=False)
             self.status_bar.set_model("—")
-
     def _start_polling(self):
         """Запускает polling."""
         self._poll_results()
         self._poll_stats()
-
     def _poll_results(self):
         """Проверяет очередь результатов. Ограничиваем до 5 за вызов чтобы не блокировать GUI."""
         try:
@@ -757,7 +700,6 @@ class VoiceTranslatorApp:
 
         if self.root:
             self.root.after(50, self._poll_results)
-
     def _poll_stats(self):
         """Обновляет статистику."""
         try:
@@ -770,10 +712,8 @@ class VoiceTranslatorApp:
                 self.status_bar.set_cache(stats["hit_rate"])
         except Exception as e:
             logger.debug(f"Ошибка статистики: {e}")
-
         if self.root:
             self.root.after(1000, self._poll_stats)
-
     def _process_result(self, result: RecognitionResult):
         """Обрабатывает результат распознавания."""
         if result.is_final:
@@ -786,7 +726,6 @@ class VoiceTranslatorApp:
                 self._partial_timer_id = None
             self._pending_partial_text = ""
             self._clear_partial_text()
-
             # Добавляем финальную русскую фразу сразу (без перевода)
             entry = TranscriptEntry(result.text, "", result.timestamp)
             self.transcript.append(entry)
@@ -797,7 +736,6 @@ class VoiceTranslatorApp:
             if self.translator and self.translator.is_loaded:
                 t0 = time.perf_counter()
                 future = self.translator.translate_async(result.text)
-
                 def _on_done(fut):
                     try:
                         translated = fut.result() or ""
@@ -807,7 +745,6 @@ class VoiceTranslatorApp:
 
                     t1 = time.perf_counter()
                     logger.debug(f"[translate] done in {(t1 - t0):.3f}s, len={len(result.text)} cache={translated != ''}")
-
                     # Обновляем UI в главном потоке
                     if self.root:
                         def _apply():
@@ -824,7 +761,6 @@ class VoiceTranslatorApp:
                             self.root.after(0, _apply)
                         except Exception:
                             _apply()
-
                 future.add_done_callback(_on_done)
         else:
             # Троттлим обновления partial: одна "живая" строка, не чаще ~120мс
@@ -834,7 +770,6 @@ class VoiceTranslatorApp:
     def _add_to_text_area(self, entry: TranscriptEntry):
         """Добавляет запись в текстовую область (устаревший метод, оставлен для совместимости)."""
         return self._append_final_original(entry)
-
     def _append_final_original(self, entry: TranscriptEntry) -> str:
         """Добавляет финальную русскую фразу и возвращает mark-индекс для последующей вставки перевода."""
         try:
@@ -842,7 +777,6 @@ class VoiceTranslatorApp:
             time_str = datetime.fromtimestamp(entry.timestamp).strftime("[%H:%M:%S] ")
             self.text_area.insert("end", time_str, ("timestamp",))
             self.text_area.insert("end", entry.original + "\n", ("original",))
-
             # Создаём mark, куда позже вставим перевод
             mark_name = f"tr_mark_{int(entry.timestamp * 1000)}"
             try:
@@ -851,7 +785,6 @@ class VoiceTranslatorApp:
             except Exception as ex:
                 logger.debug(f"Mark set failed: {ex}")
                 mark_name = "end"
-
             self.text_area.see("end")
             t1 = time.perf_counter()
             logger.debug(f"[final-insert] len={len(entry.original)} took={(t1 - t0):.3f}s")
@@ -861,9 +794,8 @@ class VoiceTranslatorApp:
 
             return mark_name
         except Exception as e:
-            logger.error(f"Ошибка в��тавки финального текста: {e}")
+            logger.error(f"Ошибка вставки финального текста: {e}")
             return "end"
-
     def _trim_text_area_if_needed(self, max_lines: int = 500):
         """Удаляет старые строки из текстовой области если превышен лимит."""
         try:
@@ -874,7 +806,6 @@ class VoiceTranslatorApp:
                 self.text_area.delete("1.0", delete_to)
         except Exception as e:
             logger.debug(f"Trim text area failed: {e}")
-
     def _clear_partial_text(self):
         """Удаляет partial текст (одна живая строка) из области."""
         try:
@@ -893,7 +824,6 @@ class VoiceTranslatorApp:
             self._last_applied_partial = ""
         except tk.TclError:
             pass
-
     def _schedule_partial_update(self):
         """Планирует отложённое обновление partial с троттлингом из конфига."""
         if not self.root:
@@ -908,7 +838,6 @@ class VoiceTranslatorApp:
         # Планируем новый с учётом конфига
         delay_ms = int(self._partial_throttle_ms)
         self._partial_timer_id = self.root.after(delay_ms, self._apply_partial_update)
-
     def _apply_partial_update(self):
         """Применяет отложенное обновление partial-строки."""
         self._partial_timer_id = None
@@ -919,12 +848,10 @@ class VoiceTranslatorApp:
 
         if not self.text_area:
             return
-
         # Ограничиваем длину partial-текста чтобы избежать переполнения
         MAX_PARTIAL_LEN = 500
         if len(text) > MAX_PARTIAL_LEN:
             text = text[:MAX_PARTIAL_LEN] + "..."
-
         try:
             t0 = time.perf_counter()
             # Устанавливаем mark при первом обновлении
@@ -936,7 +863,6 @@ class VoiceTranslatorApp:
                 self.text_area.tag_remove("partial", "1.0", "end")
             except tk.TclError:
                 pass
-
             # Переписываем только хвост от mark до конца
             self.text_area.delete(self._partial_mark_name, "end")
             self.text_area.insert("end", "⏳ " + text + "...\n", ("partial",))
@@ -946,7 +872,6 @@ class VoiceTranslatorApp:
             self._last_applied_partial = text
         except Exception as e:
             logger.debug(f"Partial update failed: {e}")
-
     def _clear_partial_text_compat(self):
         """Совместимость: устаревший метод, не используется."""
         pass
@@ -962,7 +887,6 @@ class VoiceTranslatorApp:
         # Добавляем новый partial текст
         self.text_area.insert("end", "⏳ " + self._partial_text + "...\n", ("partial",))
         self.text_area.see("end")
-
     def _on_record_toggle(self, is_recording: bool):
         """Обработчик переключения записи."""
         if is_recording:
@@ -976,7 +900,6 @@ class VoiceTranslatorApp:
             self._stop_recording()
         else:
             self._start_recording()
-
     def _start_recording(self):
         """Начинает запись."""
         if self._is_recording:
@@ -991,7 +914,6 @@ class VoiceTranslatorApp:
             self._show_error("Ошибка", "Движок распознавания не загружен")
             self.record_button.set_recording(False)
             return
-
         if not self.audio_capture:
             self._show_error("Ошибка", "Аудио не инициализировано")
             self.record_button.set_recording(False)
@@ -1005,7 +927,6 @@ class VoiceTranslatorApp:
         self.current_recognizer.reset()
         self.result_queue.clear()
         self._partial_text = ""
-
         self.recognition_thread = StoppableThread(target=self._recognition_loop, name="RecognitionThread")
         self._is_recording = True
         self.recognition_thread.start()
@@ -1015,7 +936,6 @@ class VoiceTranslatorApp:
         self.record_button.set_recording(True)
 
         logger.info("Запись начата")
-
     def _stop_recording(self):
         """Останавливает запись."""
         if not self._is_recording:
@@ -1030,7 +950,6 @@ class VoiceTranslatorApp:
 
         if self.audio_capture:
             self.audio_capture.stop_capture()
-
         self.engine_manager.state = EngineState.READY
         self.recording_status.configure(text="Нажмите кнопку для начала записи", text_color=COLORS.text_secondary)
         self.level_meter.reset()
@@ -1040,7 +959,6 @@ class VoiceTranslatorApp:
         self._clear_partial_text()
 
         logger.info("Запись остановлена")
-
     # ------------------------------------------------------------------ диктовка
     def _dictation_key_label_from_config(self) -> str:
         for label, spec in self.DICTATION_KEY_LABELS.items():
@@ -1053,7 +971,6 @@ class VoiceTranslatorApp:
             self._stop_dictation()
         else:
             self._start_dictation()
-
     def _start_dictation(self):
         if self._dictation_active:
             return
@@ -1069,7 +986,6 @@ class VoiceTranslatorApp:
         if self._is_recording:
             self._show_error("Внимание", "Остановите запись в приложении перед включением диктовки.")
             return
-
         # ВАЖНО: диктовка запускается ОТДЕЛЬНЫМ процессом. На macOS нативные
         # библиотеки (pynput-перехват клавиш, PyAudio, PyTorch/GigaAM) нельзя
         # использовать из потоков процесса, которым владеет Tkinter, — это
@@ -1081,15 +997,28 @@ class VoiceTranslatorApp:
             self._show_error("Ошибка", f"Не найден файл диктовки:\n{script}")
             return
 
-        # Передаём выбранную клавишу/режим через окружение (на случай, если
-        # dictation_main.py умеет их читать); конфиг уже сохранён в config.json.
-        env = os.environ.copy()
-        env["DICTATION_KEY"] = self.config.dictation_key
-        env["DICTATION_MODE"] = self.config.dictation_mode
+        dictation_key = str(getattr(self.config, "dictation_key", "f9") or "f9").strip().lower()
+        dictation_mode = str(getattr(self.config, "dictation_mode", "hold") or "hold").strip().lower()
+        if dictation_mode not in {"hold", "toggle"}:
+            dictation_mode = "hold"
 
+        # Передаём настройки двумя способами. Аргументы командной строки —
+        # основной интерфейс dictation_main.py; переменные окружения оставлены
+        # для совместимости с исправленной версией dictation_main.py.
+        env = os.environ.copy()
+        env["DICTATION_KEY"] = dictation_key
+        env["DICTATION_MODE"] = dictation_mode
         try:
             self._dictation_proc = subprocess.Popen(
-                [sys.executable, "-u", script],
+                [
+                    sys.executable,
+                    "-u",
+                    script,
+                    "--key",
+                    dictation_key,
+                    "--mode",
+                    dictation_mode,
+                ],
                 cwd=project_root,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
@@ -1102,7 +1031,6 @@ class VoiceTranslatorApp:
             self._show_error("Ошибка", f"Не удалось запустить диктовку: {e}")
             self._dictation_proc = None
             return
-
         self._dictation_active = True
         # Читаем вывод дочернего процесса в фоне и показываем статус в GUI.
         threading.Thread(
@@ -1110,7 +1038,6 @@ class VoiceTranslatorApp:
             args=(self._dictation_proc,),
             daemon=True,
         ).start()
-
         key_label = self._dictation_key_label_from_config()
         self.dictation_button.configure(
             text="🎤 Диктовка в курсор: ВКЛ",
@@ -1124,8 +1051,13 @@ class VoiceTranslatorApp:
                 text=f"Запуск диктовки ({key_label}, отдельный процесс)…",
                 text_color=COLORS.text_primary,
             )
-        logger.info("Диктовка включена (клавиша %s, PID %s)", key_label, self._dictation_proc.pid)
-
+        logger.info(
+            "Диктовка включена (клавиша %s/%s, режим %s, PID %s)",
+            key_label,
+            dictation_key,
+            dictation_mode,
+            self._dictation_proc.pid,
+        )
     def _stop_dictation(self):
         proc = self._dictation_proc
         if proc is not None and proc.poll() is None:
@@ -1163,7 +1095,6 @@ class VoiceTranslatorApp:
         self._sync_engine_controls()
         if was_active:
             logger.info("Диктовка выключена")
-
     def _dictation_reader(self, proc):
         """Фоновое чтение вывода процесса диктовки; статус маршалим в Tk."""
         try:
@@ -1184,7 +1115,6 @@ class VoiceTranslatorApp:
         code = proc.poll()
         if self.root:
             self.root.after(0, lambda c=code: self._on_dictation_exit(c))
-
     def _on_dictation_exit(self, code):
         """Процесс диктовки завершился. Если мы остановили его штатно — ничего не делаем."""
         if not self._dictation_active:
@@ -1211,14 +1141,12 @@ class VoiceTranslatorApp:
             self.dictation_status.configure(text=msg, text_color=color)
         self._sync_engine_controls()
         logger.info("Процесс диктовки завершился (код %s)", code)
-
     def _on_dictation_status(self, text: str):
         """Callback из потоков диктовки — маршалим в главный поток Tk."""
         logger.info("[dictation] %s", text)
         if self.root and self.dictation_status:
             self.root.after(0, lambda t=text: self.dictation_status.configure(
                 text=t, text_color=COLORS.text_primary))
-
     def _on_dictation_key_change(self, label: str):
         spec = self.DICTATION_KEY_LABELS.get(label, "f9")
         if spec == self.config.dictation_key:
@@ -1230,7 +1158,6 @@ class VoiceTranslatorApp:
     def _recognition_loop(self):
         """Основной цикл распознавания."""
         logger.debug("Recognition loop запущен")
-
         while self._is_recording and self.recognition_thread and not self.recognition_thread.stopped():
             try:
                 chunk = self.audio_capture.get_audio_chunk(timeout=0.1)
@@ -1243,7 +1170,6 @@ class VoiceTranslatorApp:
             except Exception as e:
                 logger.error(f"Ошибка в recognition loop: {e}")
                 break
-
         logger.debug("Recognition loop завершён")
 
     def _on_device_change(self, device_name: str):
@@ -1255,14 +1181,12 @@ class VoiceTranslatorApp:
         if self._dictation_active:
             self._show_error("Внимание", "Выключите «Диктовку в курсор» перед сменой устройства")
             return
-
         # Находим индекс устройства по имени
         idx = -1
         for i, name in enumerate(self._device_names):
             if name == device_name:
                 idx = i
                 break
-
         if 0 <= idx < len(self.audio_devices):
             device = self.audio_devices[idx]
             if self.audio_capture:
@@ -1271,14 +1195,12 @@ class VoiceTranslatorApp:
             self.config.device_name = device.name
             self._save_config()
             logger.info(f"Выбрано устройство: {device.name}")
-
     def _on_sensitivity_change(self, value: float):
         """Обработчик изменения чувствительности."""
         int_value = int(value)
         self.sensitivity_label.configure(text=str(int_value))
         self.config.sensitivity = int_value
         self._save_config()
-
     def _on_vad_change(self, value: float):
         """Обработчик изменения VAD порога."""
         int_value = int(value)
@@ -1287,7 +1209,6 @@ class VoiceTranslatorApp:
         if self.current_recognizer:
             self.current_recognizer.config.vad_threshold = int_value
         self._save_config()
-
     def _on_engine_change(self, engine_label: str):
         """Обработчик смены движка распознавания."""
         if self._is_recording:
@@ -1299,7 +1220,6 @@ class VoiceTranslatorApp:
             self._show_error("Внимание", "Выключите «Диктовку в курсор» перед сменой движка")
             self._sync_engine_controls()
             return
-
         new_engine = self.ENGINE_LABELS.get(engine_label, "vosk")
         if new_engine == self.config.engine:
             return
@@ -1308,7 +1228,6 @@ class VoiceTranslatorApp:
         self._save_config()
         self._sync_engine_controls()
         self._reload_recognizer(show_messages=True)
-
     def _on_gigaam_model_change(self, model_label: str):
         """Обработчик смены модели GigaAM."""
         if self._is_recording:
@@ -1320,7 +1239,6 @@ class VoiceTranslatorApp:
             self._show_error("Внимание", "Выключите «Диктовку в курсор» перед сменой модели")
             self._sync_engine_controls()
             return
-
         new_model = self.GIGAAM_MODEL_LABELS.get(model_label, "v3_e2e_rnnt")
         if self.config.engine != "gigaam" or new_model == self.config.gigaam_model:
             return
@@ -1328,7 +1246,6 @@ class VoiceTranslatorApp:
         self.config.gigaam_model = new_model
         self._save_config()
         self._reload_recognizer(show_messages=True)
-
     def _on_model_change(self, model_name: str):
         """Обработчик смены модели Vosk."""
         if self._is_recording:
@@ -1337,7 +1254,6 @@ class VoiceTranslatorApp:
             prev_model = "Точная (0.22)" if self.config.vosk_model_size == "large" else "Быстрая (0.42)"
             self.model_toggle.set(prev_model)
             return
-
         if self._dictation_active:
             self._show_error("Внимание", "Выключите «Диктовку в курсор» перед сменой модели")
             prev_model = "Точная (0.22)" if self.config.vosk_model_size == "large" else "Быстрая (0.42)"
@@ -1349,7 +1265,6 @@ class VoiceTranslatorApp:
 
         if new_size == self.config.vosk_model_size:
             return  # Модель не изменилась
-
         # Проверяем наличие модели
         from pathlib import Path
         model_path = self.config.vosk_large_model_path if new_size == "large" else self.config.vosk_model_path
@@ -1365,7 +1280,6 @@ class VoiceTranslatorApp:
             prev_model = "Точная (0.22)" if self.config.vosk_model_size == "large" else "Быстрая (0.42)"
             self.model_toggle.set(prev_model)
             return
-
         # Обновляем конфигурацию
         self.config.vosk_model_size = new_size
         self._save_config()
@@ -1378,14 +1292,12 @@ class VoiceTranslatorApp:
             self._show_error("Внимание", "Переключение движка уже выполняется")
             self._sync_engine_controls()
             return
-
         requested_label = self._configured_engine_summary()
         # Показываем статус загрузки
         self.status_bar.set_engine("Загрузка...", ready=False)
         self.status_bar.set_model("...")
         if self.recording_status:
             self.recording_status.configure(text="Загрузка движка...", text_color=COLORS.accent_warning)
-
         def reload_in_thread():
             new_recognizer = None
             error = None
@@ -1395,7 +1307,6 @@ class VoiceTranslatorApp:
                     self.current_recognizer = None
                     if old_recognizer:
                         old_recognizer.unload()
-
                     new_recognizer = self._load_configured_recognizer()
                     self.current_recognizer = new_recognizer
                     self.engine_manager.state = EngineState.READY if new_recognizer else EngineState.ERROR
@@ -1404,13 +1315,11 @@ class VoiceTranslatorApp:
                 logger.error(f"Ошибка перезагрузки распознавателя: {e}")
                 self.current_recognizer = None
                 self.engine_manager.state = EngineState.ERROR
-
             # Обновляем UI в главном потоке
             self.root.after(0, lambda: self._finish_recognizer_reload(new_recognizer, requested_label, error, show_messages))
 
         # Запускаем в фоновом потоке
         threading.Thread(target=reload_in_thread, name="RecognizerReloadThread", daemon=True).start()
-
     def _finish_recognizer_reload(self, recognizer, requested_label: str, error: Optional[Exception], show_messages: bool):
         """Applies recognizer reload results on the Tk main thread."""
         self._update_status()
@@ -1420,7 +1329,6 @@ class VoiceTranslatorApp:
         if error:
             self._show_error("Ошибка", f"Не удалось загрузить {requested_label}: {error}")
             return
-
         if not recognizer:
             self._show_error("Ошибка", f"Не удалось загрузить {requested_label}. Проверьте модели и зависимости.")
             return
@@ -1431,7 +1339,6 @@ class VoiceTranslatorApp:
                 f"{requested_label} недоступен. Загружен: {self._recognizer_engine_status(recognizer)}"
             )
             return
-
     def _configured_engine_summary(self) -> str:
         if self.config.engine == "vosk":
             model = "0.22" if self.config.vosk_model_size == "large" else "0.42"
@@ -1441,7 +1348,6 @@ class VoiceTranslatorApp:
     def _save_config(self):
         """Сохраняет конфигурацию в файл."""
         self.config.save()
-
     def _on_audio_level(self, level: float):
         """Обработчик уровня громкости (вызывается из audio thread)."""
         # ВАЖНО: Маршалим обновление UI в главный поток для thread safety
@@ -1453,7 +1359,6 @@ class VoiceTranslatorApp:
         self.transcript.clear()
         self.text_area.delete("1.0", "end")
         logger.info("Транскрипт очищен")
-
     def _copy_selection(self):
         """Копирует выделенный текст."""
         try:
@@ -1467,7 +1372,6 @@ class VoiceTranslatorApp:
         """Копирует весь русский текст (оригинал) в буфер обмена."""
         if not self.transcript:
             return
-
         russian_text = "\n".join(entry.original for entry in self.transcript)
         self.root.clipboard_clear()
         self.root.clipboard_append(russian_text)
@@ -1477,7 +1381,6 @@ class VoiceTranslatorApp:
         """Копирует весь английский текст (перевод) в буфер обмена."""
         if not self.transcript:
             return
-
         english_text = "\n".join(entry.translated for entry in self.transcript if entry.translated)
         self.root.clipboard_clear()
         self.root.clipboard_append(english_text)
@@ -1488,13 +1391,11 @@ class VoiceTranslatorApp:
         if not self.transcript:
             self._show_error("Внимание", "Нет данных для экспорта")
             return
-
         path = filedialog.asksaveasfilename(
             defaultextension=".txt",
             filetypes=[("Text files", "*.txt"), ("All files", "*.*")],
             initialfile=f"transcript_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
         )
-
         if path:
             try:
                 with open(path, "w", encoding="utf-8") as f:
@@ -1507,7 +1408,6 @@ class VoiceTranslatorApp:
                 logger.info(f"Экспортировано в {path}")
             except IOError as e:
                 self._show_error("Ошибка", f"Не удалось сохранить: {e}")
-
     def _export_json(self):
         """Экспортирует в JSON."""
         if not self.transcript:
@@ -1519,7 +1419,6 @@ class VoiceTranslatorApp:
             filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
             initialfile=f"transcript_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
         )
-
         if path:
             try:
                 data = {
@@ -1532,7 +1431,6 @@ class VoiceTranslatorApp:
                 logger.info(f"Экспортировано в {path}")
             except IOError as e:
                 self._show_error("Ошибка", f"Не удалось сохранить: {e}")
-
     def _export_srt(self):
         """Экспортирует в SRT."""
         if not self.transcript:
@@ -1544,14 +1442,12 @@ class VoiceTranslatorApp:
             filetypes=[("SRT files", "*.srt"), ("All files", "*.*")],
             initialfile=f"subtitles_{datetime.now().strftime('%Y%m%d_%H%M%S')}.srt"
         )
-
         if path:
             try:
                 with open(path, "w", encoding="utf-8") as f:
                     for i, entry in enumerate(self.transcript, 1):
                         start_time = datetime.fromtimestamp(entry.timestamp).strftime("%H:%M:%S,000")
                         end_time = datetime.fromtimestamp(entry.timestamp + 3).strftime("%H:%M:%S,000")
-
                         f.write(f"{i}\n")
                         f.write(f"{start_time} --> {end_time}\n")
                         f.write(f"{entry.original}\n")
@@ -1561,7 +1457,6 @@ class VoiceTranslatorApp:
                 logger.info(f"Экспортировано в {path}")
             except IOError as e:
                 self._show_error("Ошибка", f"Не удалось сохранить: {e}")
-
     def _show_error(self, title: str, message: str):
         """Показывает сообщение об ошибке."""
         messagebox.showerror(title, message)
@@ -1577,7 +1472,6 @@ class VoiceTranslatorApp:
         self._stop_dictation()
         self._stop_recording()
         self.config.save()
-
         if self.audio_capture:
             self.audio_capture.__exit__(None, None, None)
 

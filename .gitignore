@@ -10,6 +10,12 @@ models/
 
 Voice Translator.app/
 *.zip
+*.tar.bz2
+
+# Локально загруженные модели и резервные копии файлов
+sherpa-onnx-nemo-parakeet-unified-en-0.6b-int8-non-streaming/
+app/gui copy.py
+dictation_main copy.py
 
 venv_broken_backup/
 *.bak
