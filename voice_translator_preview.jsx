@@ -170,10 +170,10 @@ export default function VoiceTranslatorPreview() {
           <div className="flex justify-between items-start mb-4">
             <div>
               <div className="text-xs mb-2" style={{ color: COLORS.textSecondary }}>
-                Движок распознавания:
+                Модель:
               </div>
               <div className="px-3 py-2 rounded-lg text-sm" style={{ backgroundColor: COLORS.bgTertiary, color: COLORS.textPrimary }}>
-                GigaAM
+                v3 RNNT
               </div>
             </div>
             
@@ -275,7 +275,7 @@ export default function VoiceTranslatorPreview() {
         <div className="flex justify-between mt-4 text-xs" style={{ color: COLORS.textMuted }}>
           <div className="flex gap-4">
             <span style={{ color: COLORS.accentSuccess }}>
-              ● Движок: GigaAM
+              ● Движок: CPU
             </span>
             <span>Модель: v3 RNNT</span>
           </div>

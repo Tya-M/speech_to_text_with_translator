@@ -78,8 +78,8 @@ class VoiceTranslatorApp:
     }
     GIGAAM_MODEL_VALUES = list(GIGAAM_MODEL_LABELS.keys())
     DICTATION_ENGINE_LABELS = {
-        "Русский (GigaAM)": "gigaam",
-        "Русский + English (Parakeet + GigaAM)": "parakeet",
+        "Русский": "gigaam",
+        "Русский + English": "parakeet",
     }
     DICTATION_ENGINE_VALUES = list(DICTATION_ENGINE_LABELS.keys())
     DICTATION_KEY_LABELS = {
@@ -193,28 +193,11 @@ class VoiceTranslatorApp:
         top_controls = ctk.CTkFrame(control_panel, corner_radius=0, fg_color="transparent")
         top_controls.pack(fill="x", padx=SPACING.sm, pady=(SPACING.xs, 2))
 
-        # Выбор движка
-        engine_frame = ctk.CTkFrame(top_controls, corner_radius=0, fg_color="transparent")
-        engine_frame.pack(side="left", padx=(0, SPACING.sm))
-        ctk.CTkLabel(
-            engine_frame, text="Движок:",
-            font=get_font_tuple(FONTS.size_small),
-            text_color=COLORS.text_secondary
-        ).pack(anchor="w")
-        self.engine_menu = ctk.CTkOptionMenu(
-            engine_frame,
-            values=self.ENGINE_VALUES,
-            command=self._on_engine_change,
-            width=96,
-            font=get_font_tuple(FONTS.size_small)
-        )
-        self.engine_menu.set(self._engine_label_from_config())
-        self.engine_menu.pack(anchor="w", pady=(2, 0))
         gigaam_model_frame = ctk.CTkFrame(top_controls, corner_radius=0, fg_color="transparent")
         gigaam_model_frame.pack(side="left", padx=(0, SPACING.sm))
 
         ctk.CTkLabel(
-            gigaam_model_frame, text="Модель GigaAM:",
+            gigaam_model_frame, text="Модель:",
             font=get_font_tuple(FONTS.size_small),
             text_color=COLORS.text_secondary
         ).pack(anchor="w")
@@ -642,9 +625,8 @@ class VoiceTranslatorApp:
 
     def _sync_engine_controls(self):
         """Keeps selector states aligned with the selected engine."""
-        if not self.engine_menu:
-            return
-        self.engine_menu.set(self._engine_label_from_config())
+        if self.engine_menu:
+            self.engine_menu.set(self._engine_label_from_config())
         if self.gigaam_model_menu:
             self.gigaam_model_menu.set(self._gigaam_model_label_from_config())
             self.gigaam_model_menu.configure(state="normal")
@@ -656,7 +638,7 @@ class VoiceTranslatorApp:
         class_name = recognizer.__class__.__name__
         if class_name == "GigaAMRecognizer":
             device = str(getattr(recognizer, "device", "cpu")).upper()
-            return f"GigaAM · {device}"
+            return device
         return getattr(recognizer, "_model_name", recognizer.name)
     def _recognizer_model_status(self, recognizer) -> str:
         class_name = recognizer.__class__.__name__
@@ -1390,7 +1372,7 @@ class VoiceTranslatorApp:
             )
             return
     def _configured_engine_summary(self) -> str:
-        return f"GigaAM {self.config.gigaam_model}"
+        return f"Модель {self.config.gigaam_model}"
 
     def _save_config(self):
         """Сохраняет конфигурацию в файл."""
