@@ -62,6 +62,8 @@ class AppConfig:
 
     # Кэш переводов
     translation_cache_size: int = 100
+    translation_engine: Literal["argos", "translategemma"] = "argos"
+    translategemma_model_id: str = "google/translategemma-4b-it"
 
     # Троттлинг partial-обновлений (мс)
     partial_throttle_ms: int = 100
@@ -89,6 +91,16 @@ class AppConfig:
         self.translation_cache_size = _bounded_int(
             self.translation_cache_size, 100, 1, 10000
         )
+        self.translation_engine = str(self.translation_engine or "argos").strip().lower()
+        if self.translation_engine not in {"argos", "translategemma"}:
+            logger.warning(
+                "Неизвестный переводчик '%s', используем argos",
+                self.translation_engine,
+            )
+            self.translation_engine = "argos"
+        self.translategemma_model_id = str(
+            self.translategemma_model_id or "google/translategemma-4b-it"
+        ).strip()
         self.device_name = str(self.device_name or "").strip()
 
         allowed_engines = {"gigaam"}

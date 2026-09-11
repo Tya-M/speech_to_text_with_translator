@@ -16,6 +16,8 @@ speech-recognition or translation services.
 
 - **Offline Russian speech recognition** through **GigaAM**.
 - **Translation** of the recognized text.
+- **Two selectable local translators:** fast `Argos` and the newer
+  `TranslateGemma 4B` (the Google model is downloaded locally when selected).
 - **🎤 Dictation into cursor** — hold a hotkey, speak, and the text is typed
   wherever your cursor is (browser, editor, messenger, etc.).
 - Dictation offers a **Russian** or **Russian + English** profile. The Russian
@@ -41,6 +43,7 @@ speech-recognition or translation services.
   - `pyaudio` — microphone audio capture;
   - `gigaam` — the Russian speech recognition engine (installed separately by the
     command below; it is only commented in `requirements.txt`);
+  - `transformers` and `safetensors` — the local TranslateGemma 4B backend;
   - `pynput`, `pyobjc-framework-Quartz`, `pyobjc-framework-Cocoa` — typing into the
     cursor and handling global hotkeys on macOS.
 
@@ -74,7 +77,11 @@ the directory specified by `parakeet_model_path`.
 
 On first launch, GigaAM may download the selected model if it is not cached. If the
 Argos Translate package is not installed locally, Argos downloads its index and the
-`ru→en` language package.
+`ru→en` language package. When TranslateGemma is selected, the app downloads the
+official `google/translategemma-4b-it` model from Hugging Face and then runs locally
+on the CPU. You must accept Google's Gemma license on the model page before the
+download. TranslateGemma is considerably heavier and slower than Argos on this
+computer, so Argos remains the default.
 
 ### Testing
 
@@ -145,8 +152,6 @@ mode, set `dictation_mode: "toggle"` in `config.json` or run standalone mode wit
 
 Main parameters:
 
-| Parameter          | Purpose                                                 | Example         |
-|--------------------|---------------------------------------------------------|-----------------|
 | Parameter | Purpose | Example / range |
 |---|---|---|
 | `engine` | Main recognition engine; only `gigaam` is currently supported | `"gigaam"` |
@@ -162,6 +167,8 @@ Main parameters:
 | `font_size` | Transcript font size | `14` (10–24) |
 | `window_width` / `window_height` | Application window size | `900` / `450` |
 | `translation_cache_size` | Translation-cache size | `100` (1–10000) |
+| `translation_engine` | Translator: `argos` or `translategemma` | `"argos"` |
+| `translategemma_model_id` | Hugging Face model ID or local model directory | `"google/translategemma-4b-it"` |
 | `partial_throttle_ms` | Partial-text update interval, ms | `100` (50–300) |
 | `dictation_key` | Hotkey: `f7`–`f12`, `alt_r`, or `cmd_r` | `"cmd_r"` |
 | `dictation_mode` | Mode: `hold` or `toggle` | `"hold"` |
@@ -169,8 +176,8 @@ Main parameters:
 | `parakeet_model_path` | Local Parakeet Unified EN model directory | `"sherpa-onnx-nemo-parakeet-unified-en-0.6b-int8-non-streaming"` |
 | `parakeet_num_threads` | Number of Parakeet CPU threads | `2` (1–8) |
 
-The interface changes the model, microphone, sensitivity, VAD, dictation language
-profile, and hotkey. These changes are saved automatically. Other parameters are
+The interface changes the recognition model, translator, microphone, sensitivity,
+VAD, dictation language profile, and hotkey. These changes are saved automatically. Other parameters are
 edited in `config.json`; the standalone CLI additionally accepts the hotkey, mode,
 and dictation profile.
 
@@ -206,6 +213,9 @@ and dictation profile.
 - **Error installing GigaAM** — make sure `ffmpeg` is installed.
 - **Parakeet does not load** — install `sherpa-onnx` and `sherpa-onnx-bin`, then
   verify that the four model files are present in `parakeet_model_path`.
+- **TranslateGemma does not load** — install the dependencies from `requirements.txt`,
+  accept the Gemma license on Hugging Face, and check `translategemma_model_id`.
+  If the model is unavailable, the app automatically uses Argos.
 - **`error: externally-managed-environment`** — install dependencies inside an
   activated virtual environment (`source venv/bin/activate`).
 

@@ -31,7 +31,13 @@ from utils.threading_utils import (
 )
 from audio.capture import AudioCapture, AudioDevice
 from recognition import create_recognizer
-from translation import Translator, ARGOS_AVAILABLE
+from translation import (
+    ARGOS_AVAILABLE,
+    TRANSLATEGEMMA_AVAILABLE,
+    TRANSLATION_ENGINE_LABELS,
+    TRANSLATION_ENGINE_VALUES,
+    create_translator,
+)
 # Глобальная диктовка «речь → текст под курсором». Импорт защищён: если не
 # установлены pynput/pyobjc, приложение всё равно запустится (кнопка будет
 # недоступна).
@@ -106,7 +112,9 @@ class VoiceTranslatorApp:
 
         # Компоненты
         self.audio_capture: Optional[AudioCapture] = None
-        self.translator: Optional[Translator] = None
+        self.translator = None
+        self._translation_runtime_engine: Optional[str] = None
+        self._translation_switching = False
         self.current_recognizer = None
         # Потоки
         self.recognition_thread: Optional[StoppableThread] = None
@@ -117,6 +125,7 @@ class VoiceTranslatorApp:
         self.record_button: Optional[RecordButton] = None
         self.engine_menu: Optional[ctk.CTkOptionMenu] = None
         self.gigaam_model_menu: Optional[ctk.CTkOptionMenu] = None
+        self.translation_engine_menu: Optional[ctk.CTkOptionMenu] = None
         self.status_bar: Optional[StatusBar] = None
         self.device_menu: Optional[ctk.CTkOptionMenu] = None
         self.sensitivity_slider: Optional[ctk.CTkSlider] = None
@@ -210,6 +219,23 @@ class VoiceTranslatorApp:
         )
         self.gigaam_model_menu.set(self._gigaam_model_label_from_config())
         self.gigaam_model_menu.pack(anchor="w", pady=(2, 0))
+
+        translation_frame = ctk.CTkFrame(top_controls, corner_radius=0, fg_color="transparent")
+        translation_frame.pack(side="left", padx=(0, SPACING.sm))
+        ctk.CTkLabel(
+            translation_frame, text="Переводчик:",
+            font=get_font_tuple(FONTS.size_small),
+            text_color=COLORS.text_secondary,
+        ).pack(anchor="w")
+        self.translation_engine_menu = ctk.CTkOptionMenu(
+            translation_frame,
+            values=TRANSLATION_ENGINE_VALUES,
+            command=self._on_translation_engine_change,
+            width=180,
+            font=get_font_tuple(FONTS.size_small),
+        )
+        self.translation_engine_menu.set(self._translation_engine_label_from_config())
+        self.translation_engine_menu.pack(anchor="w", pady=(2, 0))
         self._sync_engine_controls()
         # Выбор устройства (CTkOptionMenu)
         device_frame = ctk.CTkFrame(top_controls, corner_radius=0, fg_color="transparent")
@@ -561,17 +587,9 @@ class VoiceTranslatorApp:
         except Exception as e:
             logger.error(f"Ошибка загрузки распознавателя: {e}")
             self.current_recognizer = None
-        # Переводчик
-        if ARGOS_AVAILABLE:
-            try:
-                self.translator = Translator(cache_size=self.config.translation_cache_size)
-                if self.translator.load():
-                    logger.info("Переводчик загружен")
-                else:
-                    self.translator = None
-            except Exception as e:
-                logger.error(f"Ошибка загрузки переводчика: {e}")
-                self.translator = None
+        # Переводчик. TranslateGemma загружается только если выбран в конфиге;
+        # Argos остаётся безопасным fallback при отсутствии optional-зависимостей.
+        self.translator, self._translation_runtime_engine = self._load_translator_with_fallback()
         self.engine_manager.state = EngineState.READY if self.current_recognizer else EngineState.ERROR
         self.root.after(0, self._update_status)
         logger.info("Инициализация завершена")
@@ -623,6 +641,12 @@ class VoiceTranslatorApp:
                 return label
         return "v3 RNNT (точнее)"
 
+    def _translation_engine_label_from_config(self) -> str:
+        for label, engine in TRANSLATION_ENGINE_LABELS.items():
+            if engine == self.config.translation_engine:
+                return label
+        return TRANSLATION_ENGINE_VALUES[0]
+
     def _sync_engine_controls(self):
         """Keeps selector states aligned with the selected engine."""
         if self.engine_menu:
@@ -630,6 +654,44 @@ class VoiceTranslatorApp:
         if self.gigaam_model_menu:
             self.gigaam_model_menu.set(self._gigaam_model_label_from_config())
             self.gigaam_model_menu.configure(state="normal")
+        if self.translation_engine_menu:
+            self.translation_engine_menu.set(self._translation_engine_label_from_config())
+
+    def _load_translator_with_fallback(self):
+        """Load the requested backend and fall back to Argos if possible."""
+        requested = self.config.translation_engine
+        if requested == "translategemma" and not TRANSLATEGEMMA_AVAILABLE:
+            logger.warning(
+                "TranslateGemma выбран, но transformers/torch недоступны"
+            )
+        translator = create_translator(
+            requested,
+            cache_size=self.config.translation_cache_size,
+            translategemma_model_id=self.config.translategemma_model_id,
+        )
+        try:
+            if translator.load():
+                logger.info("Переводчик загружен: %s", requested)
+                return translator, requested
+        except Exception as exc:
+            logger.error("Ошибка загрузки переводчика %s: %s", requested, exc)
+        translator.unload()
+
+        if requested != "argos" and ARGOS_AVAILABLE:
+            fallback = create_translator(
+                "argos",
+                cache_size=self.config.translation_cache_size,
+            )
+            try:
+                if fallback.load():
+                    logger.warning(
+                        "TranslateGemma недоступен, используется fallback Argos"
+                    )
+                    return fallback, "argos"
+            except Exception as exc:
+                logger.error("Ошибка загрузки fallback Argos: %s", exc)
+            fallback.unload()
+        return None, None
     def _load_configured_recognizer(self):
         """Loads the configured recognizer through the shared factory."""
         rec_config = RecognitionConfig.from_app_config(self.config)
@@ -1308,6 +1370,102 @@ class VoiceTranslatorApp:
         self.config.gigaam_model = new_model
         self._save_config()
         self._reload_recognizer(show_messages=True)
+
+    def _on_translation_engine_change(self, engine_label: str):
+        """Switches the text-translation backend without blocking Tk."""
+        if self._is_recording:
+            self._show_error("Внимание", "Остановите запись перед сменой переводчика")
+            self._sync_engine_controls()
+            return
+        if self._dictation_active:
+            self._show_error(
+                "Внимание",
+                "Выключите «Диктовку в курсор» перед сменой переводчика",
+            )
+            self._sync_engine_controls()
+            return
+
+        new_engine = TRANSLATION_ENGINE_LABELS.get(engine_label, "argos")
+        if new_engine == self.config.translation_engine:
+            return
+        if self._translation_switching:
+            self._show_error("Внимание", "Переключение переводчика уже выполняется")
+            self._sync_engine_controls()
+            return
+
+        self.config.translation_engine = new_engine
+        self._save_config()
+        self._reload_translator(show_messages=True)
+
+    def _reload_translator(self, show_messages: bool = False):
+        """Reload the selected translation backend in a worker thread."""
+        if self._translation_switching:
+            return
+        self._translation_switching = True
+        requested = self.config.translation_engine
+        old_translator = self.translator
+        if self.recording_status:
+            self.recording_status.configure(
+                text="Загрузка переводчика...",
+                text_color=COLORS.accent_warning,
+            )
+
+        def reload_in_thread():
+            new_translator, runtime_engine = self._load_translator_with_fallback()
+            if new_translator:
+                self.translator = new_translator
+                self._translation_runtime_engine = runtime_engine
+                if old_translator and old_translator is not new_translator:
+                    old_translator.unload()
+            if self._is_closing or not self.root:
+                return
+            try:
+                self.root.after(
+                    0,
+                    lambda: self._finish_translation_reload(
+                        bool(new_translator), runtime_engine, requested, show_messages
+                    ),
+                )
+            except Exception:
+                logger.debug("Не удалось обновить UI после смены переводчика")
+
+        threading.Thread(
+            target=reload_in_thread,
+            name="TranslationReloadThread",
+            daemon=True,
+        ).start()
+
+    def _finish_translation_reload(
+        self,
+        loaded: bool,
+        runtime_engine: Optional[str],
+        requested: str,
+        show_messages: bool,
+    ):
+        self._translation_switching = False
+        self._sync_engine_controls()
+        if self.recording_status:
+            self.recording_status.configure(
+                text="Нажмите кнопку для начала записи",
+                text_color=COLORS.text_secondary,
+            )
+        if not loaded:
+            if show_messages:
+                self._show_error(
+                    "Ошибка",
+                    "Не удалось загрузить выбранный переводчик. "
+                    "Проверьте зависимости, модель и доступ к сети при первом запуске.",
+                )
+            return
+        if (
+            show_messages
+            and requested == "translategemma"
+            and runtime_engine != requested
+        ):
+            self._show_warning(
+                "Fallback",
+                "TranslateGemma недоступен — продолжена работа с Argos.",
+            )
     def _reload_recognizer(self, show_messages: bool = False):
         """Перезагружает текущий распознаватель без блокировки Tk main loop."""
         if self.engine_manager.is_switching:

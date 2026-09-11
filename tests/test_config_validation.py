@@ -36,6 +36,18 @@ class TestConfigValidation(unittest.TestCase):
         self.assertEqual(cache.get("key"), "value")
         self.assertEqual(cache.stats["maxsize"], 1)
 
+    def test_translation_backend_and_model_are_normalized(self):
+        config = AppConfig(
+            translation_engine="TRANSLATEGEMMA",
+            translategemma_model_id="  local/model  ",
+        )
+
+        self.assertEqual(config.translation_engine, "translategemma")
+        self.assertEqual(config.translategemma_model_id, "local/model")
+
+        fallback = AppConfig(translation_engine="unknown")
+        self.assertEqual(fallback.translation_engine, "argos")
+
 
 if __name__ == "__main__":
     unittest.main()

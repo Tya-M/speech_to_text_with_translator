@@ -13,6 +13,11 @@ numpy>=1.21.0,<2.0.0
 # Translation - Argos (offline)
 argostranslate>=1.9.0
 
+# Local TranslateGemma 4B backend (CPU; model is downloaded on first use)
+# Accept Google's Gemma license on Hugging Face before the first download.
+transformers>=4.57.0,<5.0.0
+safetensors>=0.4.3
+
 # Utilities
 psutil>=5.9.0
 
