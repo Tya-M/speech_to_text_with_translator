@@ -241,6 +241,15 @@ class GigaAMRecognizer(BaseRecognizer):
         """Очищает буфер потокового звука и калибровку шума."""
         self._reset_buffer()
 
+    def finalize_stream(self) -> Generator[RecognitionResult, None, None]:
+        """Распознаёт накопленную фразу при остановке записи."""
+        if not self._is_loaded or self._model is None or not self._has_speech:
+            return
+
+        bytes_per_sec = int(self.config.sample_rate) * 2
+        min_speech_bytes = int(bytes_per_sec * self.MIN_SPEECH_SEC)
+        yield from self._flush(min_speech_bytes)
+
     def _reset_buffer(self) -> None:
         self._buffer.clear()
         self._preroll.clear()

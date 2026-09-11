@@ -145,21 +145,23 @@ class EngineManager:
         Context manager для безопасного переключения движка.
         Предотвращает одновременное переключение из нескольких потоков.
         """
-        if self._switching.is_set():
-            raise RuntimeError("Переключение движка уже выполняется")
-        
-        self._switching.set()
-        old_state = self.state
-        self.state = EngineState.SWITCHING
-        
-        try:
-            with self._lock:
+        # Check and set the flag while holding the same lock used by the
+        # reload operation. This prevents two callers from passing the check
+        # concurrently.
+        with self._lock:
+            if self._switching.is_set():
+                raise RuntimeError("Переключение движка уже выполняется")
+            self._switching.set()
+            old_state = self.state
+            self.state = EngineState.SWITCHING
+
+            try:
                 yield
-        finally:
-            self._switching.clear()
-            # Восстанавливаем состояние если переключение не завершилось нормально
-            if self.state == EngineState.SWITCHING:
-                self.state = old_state
+            finally:
+                self._switching.clear()
+                # Восстанавливаем состояние если переключение не завершилось нормально
+                if self.state == EngineState.SWITCHING:
+                    self.state = old_state
     
     def wait_for_switch(self, timeout: float = 10.0) -> bool:
         """Ожидает завершения переключения движка."""

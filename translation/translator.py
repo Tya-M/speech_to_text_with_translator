@@ -30,7 +30,11 @@ class TranslationCache:
     
     def __init__(self, maxsize: int = 100):
         self._cache: OrderedDict[str, str] = OrderedDict()
-        self._maxsize = maxsize
+        try:
+            maxsize = int(maxsize)
+        except (TypeError, ValueError):
+            maxsize = 100
+        self._maxsize = max(1, maxsize)
         self._lock = threading.Lock()
         self._hits = 0
         self._misses = 0
@@ -109,8 +113,12 @@ class Translator:
         self._translation_fn = None
         self._is_loaded = False
         self._lock = threading.Lock()
+        self._executor = self._new_executor()
+
+    @staticmethod
+    def _new_executor() -> ThreadPoolExecutor:
         # 1 worker для Intel i5 4-core — сохраняем стабильную нагрузку CPU
-        self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="Translator")
+        return ThreadPoolExecutor(max_workers=1, thread_name_prefix="Translator")
     
     def load(self) -> bool:
         """
@@ -121,6 +129,10 @@ class Translator:
             logger.error("Argos Translate недоступен")
             return False
         
+        with self._lock:
+            if self._executor is None:
+                self._executor = self._new_executor()
+
         if self._is_loaded:
             return True
         
@@ -212,10 +224,14 @@ class Translator:
     
     def unload(self) -> None:
         """Выгружает переводчик."""
-        self._translation_fn = None
-        self._is_loaded = False
+        with self._lock:
+            self._translation_fn = None
+            self._is_loaded = False
+            executor = self._executor
+            self._executor = None
         self._cache.clear()
-        self._executor.shutdown(wait=False)
+        if executor:
+            executor.shutdown(wait=False, cancel_futures=True)
         logger.info("Переводчик выгружен")
     
     def translate(self, text: str) -> Optional[str]:
@@ -261,7 +277,10 @@ class Translator:
         Асинхронный перевод текста.
         Возвращает Future с результатом.
         """
-        return self._executor.submit(self.translate, text)
+        with self._lock:
+            if self._executor is None:
+                self._executor = self._new_executor()
+            return self._executor.submit(self.translate, text)
     
     @property
     def is_loaded(self) -> bool:

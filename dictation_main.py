@@ -79,7 +79,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=_env_engine(),
         choices=VALID_ENGINES,
         help=(
-            "Движок диктовки: gigaam — русский, parakeet — английский. "
+            "Движок диктовки: gigaam — русский, parakeet — русский + английский. "
             "По умолчанию: DICTATION_ENGINE или gigaam."
         ),
     )

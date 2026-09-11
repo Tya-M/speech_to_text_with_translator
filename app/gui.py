@@ -79,7 +79,7 @@ class VoiceTranslatorApp:
     GIGAAM_MODEL_VALUES = list(GIGAAM_MODEL_LABELS.keys())
     DICTATION_ENGINE_LABELS = {
         "Русский (GigaAM)": "gigaam",
-        "English (Parakeet)": "parakeet",
+        "Русский + English (Parakeet + GigaAM)": "parakeet",
     }
     DICTATION_ENGINE_VALUES = list(DICTATION_ENGINE_LABELS.keys())
     DICTATION_KEY_LABELS = {
@@ -101,6 +101,8 @@ class VoiceTranslatorApp:
         self.engine_manager = EngineManager()
         self.result_queue: ThreadSafeQueue[RecognitionResult] = ThreadSafeQueue()
         self.transcript: List[TranscriptEntry] = []
+        self._transcript_lock = threading.Lock()
+        self._transcript_generation = 0
 
         # Компоненты
         self.audio_capture: Optional[AudioCapture] = None
@@ -131,12 +133,14 @@ class VoiceTranslatorApp:
         self._device_names: List[str] = ["Загрузка..."]
         # Флаги
         self._is_recording = False
+        self._finalize_requested = threading.Event()
         # Глобальная диктовка «речь → текст под курсором».
         # Работает ОТДЕЛЬНЫМ процессом (dictation_main.py), поэтому здесь только
         # ссылка на процесс и флаг активности.
         self.dictation_service = None  # оставлено для совместимости, не используется
         self._dictation_proc = None    # subprocess процесса диктовки
         self._dictation_active = False
+        self._is_closing = False
         # Partial-обновления (троттлинг и одна "живая" строка)
         self._pending_partial_text: str = ""
         self._last_applied_partial: str = ""
@@ -551,10 +555,12 @@ class VoiceTranslatorApp:
         try:
             self.audio_capture = AudioCapture(
                 sample_rate=self.config.sample_rate,
-                device_index=self.config.device_index
+                device_index=self.config.device_index,
+                sensitivity=self.config.sensitivity,
             )
             self.audio_capture.__enter__()
             self.audio_capture.set_level_callback(self._on_audio_level)
+            self.audio_capture.set_error_callback(self._on_audio_failure)
             self.audio_devices = self.audio_capture.get_input_devices()
             self.root.after(0, self._update_device_list)
             logger.info(f"Аудио инициализировано, {len(self.audio_devices)} устройств")
@@ -701,6 +707,12 @@ class VoiceTranslatorApp:
             self.root.after(1000, self._poll_stats)
     def _process_result(self, result: RecognitionResult):
         """Обрабатывает результат распознавания."""
+        if not self._is_current_result(result):
+            logger.debug("Ignoring recognition result from cleared transcript generation")
+            return
+        with self._transcript_lock:
+            current_generation = self._transcript_generation
+
         if result.is_final:
             # Очистить возможный запланированный partial и удалить его из UI
             if hasattr(self, "_partial_timer_id") and self._partial_timer_id:
@@ -719,6 +731,7 @@ class VoiceTranslatorApp:
 
             # Асинхронный перевод только финальных фраз, чтобы не блокировать GUI
             if self.translator and self.translator.is_loaded:
+                translation_generation = current_generation
                 t0 = time.perf_counter()
                 future = self.translator.translate_async(result.text)
                 def _on_done(fut):
@@ -733,6 +746,10 @@ class VoiceTranslatorApp:
                     # Обновляем UI в главном потоке
                     if self.root:
                         def _apply():
+                            if not self._is_current_transcript_generation(
+                                translation_generation, entry
+                            ):
+                                return
                             entry.translated = translated
                             if translated:
                                 try:
@@ -751,6 +768,25 @@ class VoiceTranslatorApp:
             # Троттлим обновления partial: одна "живая" строка, не чаще ~120мс
             self._pending_partial_text = result.text
             self._schedule_partial_update()
+
+    def _is_current_result(self, result: RecognitionResult) -> bool:
+        with self._transcript_lock:
+            current_generation = self._transcript_generation
+        result_generation = getattr(result, "_transcript_generation", current_generation)
+        return result_generation == current_generation
+
+    def _is_current_transcript_generation(self, generation: int, entry=None) -> bool:
+        with self._transcript_lock:
+            if generation != self._transcript_generation:
+                return False
+        return entry is None or entry in self.transcript
+
+    def _enqueue_recognition_result(self, result: RecognitionResult) -> None:
+        """Tags results with the transcript generation active at production time."""
+        with self._transcript_lock:
+            generation = self._transcript_generation
+        result._transcript_generation = generation
+        self.result_queue.put(result)
 
     def _add_to_text_area(self, entry: TranscriptEntry):
         """Добавляет запись в текстовую область (устаревший метод, оставлен для совместимости)."""
@@ -774,23 +810,13 @@ class VoiceTranslatorApp:
             t1 = time.perf_counter()
             logger.debug(f"[final-insert] len={len(entry.original)} took={(t1 - t0):.3f}s")
 
-            # Ограничиваем размер текстовой области — удаляем старые строки при превышении лимита
-            self._trim_text_area_if_needed()
-
             return mark_name
         except Exception as e:
             logger.error(f"Ошибка вставки финального текста: {e}")
             return "end"
     def _trim_text_area_if_needed(self, max_lines: int = 500):
-        """Удаляет старые строки из текстовой области если превышен лимит."""
-        try:
-            line_count = int(self.text_area.index("end-1c").split(".")[0])
-            if line_count > max_lines:
-                # Удаляем первые строки с запасом
-                delete_to = f"{line_count - max_lines + 50}.0"
-                self.text_area.delete("1.0", delete_to)
-        except Exception as e:
-            logger.debug(f"Trim text area failed: {e}")
+        """Compatibility no-op: the text widget is the transcript viewport."""
+        return
     def _clear_partial_text(self):
         """Удаляет partial текст (одна живая строка) из области."""
         try:
@@ -912,6 +938,7 @@ class VoiceTranslatorApp:
         self.current_recognizer.reset()
         self.result_queue.clear()
         self._partial_text = ""
+        self._finalize_requested.clear()
         self.recognition_thread = StoppableThread(target=self._recognition_loop, name="RecognitionThread")
         self._is_recording = True
         self.recognition_thread.start()
@@ -927,14 +954,15 @@ class VoiceTranslatorApp:
             return
 
         self._is_recording = False
+        self._finalize_requested.set()
+
+        if self.audio_capture:
+            self.audio_capture.stop_capture()
 
         if self.recognition_thread:
             self.recognition_thread.stop()
             self.recognition_thread.join(timeout=2.0)
             self.recognition_thread = None
-
-        if self.audio_capture:
-            self.audio_capture.stop_capture()
         self.engine_manager.state = EngineState.READY
         self.recording_status.configure(text="Нажмите кнопку для начала записи", text_color=COLORS.text_secondary)
         self.level_meter.reset()
@@ -1170,19 +1198,57 @@ class VoiceTranslatorApp:
     def _recognition_loop(self):
         """Основной цикл распознавания."""
         logger.debug("Recognition loop запущен")
-        while self._is_recording and self.recognition_thread and not self.recognition_thread.stopped():
-            try:
+        try:
+            while self._is_recording and self.recognition_thread and not self.recognition_thread.stopped():
                 chunk = self.audio_capture.get_audio_chunk(timeout=0.1)
                 if chunk is None:
+                    if self.audio_capture and not self.audio_capture.is_capturing:
+                        raise RuntimeError("Захват аудио остановился неожиданно")
                     continue
 
                 for result in self.current_recognizer.recognize_stream(chunk):
-                    self.result_queue.put(result)
+                    self._enqueue_recognition_result(result)
 
-            except Exception as e:
-                logger.error(f"Ошибка в recognition loop: {e}")
-                break
+            if self._finalize_requested.is_set() and self.current_recognizer:
+                # Обрабатываем уже попавшие в очередь chunks перед финализацией.
+                while True:
+                    chunk = self.audio_capture.get_audio_chunk(timeout=0.0)
+                    if chunk is None:
+                        break
+                    for result in self.current_recognizer.recognize_stream(chunk):
+                        self._enqueue_recognition_result(result)
+
+                for result in self.current_recognizer.finalize_stream():
+                    self._enqueue_recognition_result(result)
+        except Exception as e:
+            logger.error(f"Ошибка в recognition loop: {e}")
+            self._is_recording = False
+            self._finalize_requested.clear()
+            if self.root:
+                try:
+                    self.root.after(0, lambda message=str(e): self._handle_recording_failure(message))
+                except Exception:
+                    pass
         logger.debug("Recognition loop завершён")
+
+    def _handle_recording_failure(self, message: str) -> None:
+        """Возвращает UI в READY после отказа audio/recognition worker."""
+        if self.audio_capture:
+            self.audio_capture.stop_capture()
+        if self.recognition_thread and not self.recognition_thread.is_alive():
+            self.recognition_thread = None
+        self.engine_manager.state = EngineState.READY
+        if self.recording_status:
+            self.recording_status.configure(
+                text="Ошибка записи — попробуйте ещё раз",
+                text_color=COLORS.accent_error,
+            )
+        if self.level_meter:
+            self.level_meter.reset()
+        if self.record_button:
+            self.record_button.set_recording(False)
+        self._clear_partial_text()
+        logger.error("Запись остановлена из-за ошибки worker: %s", message)
 
     def _on_device_change(self, device_name: str):
         """Обработчик смены устройства."""
@@ -1212,6 +1278,8 @@ class VoiceTranslatorApp:
         int_value = int(value)
         self.sensitivity_label.configure(text=str(int_value))
         self.config.sensitivity = int_value
+        if self.audio_capture:
+            self.audio_capture.set_sensitivity(int_value)
         self._save_config()
     def _on_vad_change(self, value: float):
         """Обработчик изменения VAD порога."""
@@ -1273,22 +1341,32 @@ class VoiceTranslatorApp:
         def reload_in_thread():
             new_recognizer = None
             error = None
+            old_recognizer = self.current_recognizer
             try:
                 with self.engine_manager.switch_engine():
-                    old_recognizer = self.current_recognizer
-                    self.current_recognizer = None
-                    if old_recognizer:
-                        old_recognizer.unload()
                     new_recognizer = self._load_configured_recognizer()
-                    self.current_recognizer = new_recognizer
-                    self.engine_manager.state = EngineState.READY if new_recognizer else EngineState.ERROR
+                    if new_recognizer:
+                        self.current_recognizer = new_recognizer
+                        if old_recognizer and old_recognizer is not new_recognizer:
+                            old_recognizer.unload()
+                        self.engine_manager.state = EngineState.READY
+                    else:
+                        # Keep the previous working model if replacement loading
+                        # fails; the user can continue recording and retry later.
+                        self.current_recognizer = old_recognizer
+                        self.engine_manager.state = EngineState.READY if old_recognizer else EngineState.ERROR
             except Exception as e:
                 error = e
                 logger.error(f"Ошибка перезагрузки распознавателя: {e}")
-                self.current_recognizer = None
-                self.engine_manager.state = EngineState.ERROR
+                self.current_recognizer = old_recognizer
+                self.engine_manager.state = EngineState.READY if self.current_recognizer else EngineState.ERROR
             # Обновляем UI в главном потоке
-            self.root.after(0, lambda: self._finish_recognizer_reload(new_recognizer, requested_label, error, show_messages))
+            if self._is_closing or not self.root:
+                return
+            try:
+                self.root.after(0, lambda: self._finish_recognizer_reload(new_recognizer, requested_label, error, show_messages))
+            except Exception:
+                logger.debug("Не удалось обновить UI после перезагрузки: окно закрывается")
 
         # Запускаем в фоновом потоке
         threading.Thread(target=reload_in_thread, name="RecognizerReloadThread", daemon=True).start()
@@ -1323,10 +1401,33 @@ class VoiceTranslatorApp:
         if self.level_meter and self.root:
             self.root.after(0, lambda l=level: self.level_meter.set_level(l))
 
+    def _on_audio_failure(self, message: str):
+        """Marshals an unrecoverable capture failure to the Tk main thread."""
+        logger.error("Сбой аудиопотока: %s", message)
+        self._is_recording = False
+        if self.root and not self._is_closing:
+            try:
+                self.root.after(0, lambda m=message: self._handle_recording_failure(m))
+            except Exception:
+                logger.debug("Не удалось сообщить о сбое аудиопотока: окно закрывается")
+
     def _clear_transcript(self):
         """Очищает транскрипт."""
+        with self._transcript_lock:
+            self._transcript_generation += 1
+        self.result_queue.clear()
+        if self._partial_timer_id:
+            try:
+                self.root.after_cancel(self._partial_timer_id)
+            except Exception:
+                pass
+            self._partial_timer_id = None
+        self._pending_partial_text = ""
+        self._last_applied_partial = ""
         self.transcript.clear()
-        self.text_area.delete("1.0", "end")
+        if self.text_area:
+            self.text_area.delete("1.0", "end")
+        self._clear_partial_text()
         logger.info("Транскрипт очищен")
     def _copy_selection(self):
         """Копирует выделенный текст."""
@@ -1414,9 +1515,9 @@ class VoiceTranslatorApp:
         if path:
             try:
                 with open(path, "w", encoding="utf-8") as f:
-                    for i, entry in enumerate(self.transcript, 1):
-                        start_time = datetime.fromtimestamp(entry.timestamp).strftime("%H:%M:%S,000")
-                        end_time = datetime.fromtimestamp(entry.timestamp + 3).strftime("%H:%M:%S,000")
+                    for i, (entry, start, end) in enumerate(self._srt_segments(), 1):
+                        start_time = self._format_srt_time(start)
+                        end_time = self._format_srt_time(end)
                         f.write(f"{i}\n")
                         f.write(f"{start_time} --> {end_time}\n")
                         f.write(f"{entry.original}\n")
@@ -1426,6 +1527,40 @@ class VoiceTranslatorApp:
                 logger.info(f"Экспортировано в {path}")
             except IOError as e:
                 self._show_error("Ошибка", f"Не удалось сохранить: {e}")
+
+    def _srt_segments(self):
+        """Returns approximate, sequential, non-overlapping subtitle timings."""
+        if not self.transcript:
+            return []
+
+        minimum_duration = 0.5
+        default_last_duration = 3.0
+        base_timestamp = self.transcript[0].timestamp
+        starts = []
+        cursor = 0.0
+        for entry in self.transcript:
+            intended_start = max(0.0, entry.timestamp - base_timestamp)
+            start = max(intended_start, cursor)
+            starts.append(start)
+            cursor = start + minimum_duration
+
+        segments = []
+        for index, entry in enumerate(self.transcript):
+            start = starts[index]
+            if index + 1 < len(starts):
+                end = max(start + minimum_duration, starts[index + 1])
+            else:
+                end = start + default_last_duration
+            segments.append((entry, start, end))
+        return segments
+
+    @staticmethod
+    def _format_srt_time(seconds: float) -> str:
+        milliseconds = max(0, int(round(seconds * 1000)))
+        hours, remainder = divmod(milliseconds, 3_600_000)
+        minutes, remainder = divmod(remainder, 60_000)
+        seconds, millis = divmod(remainder, 1000)
+        return f"{hours:02d}:{minutes:02d}:{seconds:02d},{millis:03d}"
     def _show_error(self, title: str, message: str):
         """Показывает сообщение об ошибке."""
         messagebox.showerror(title, message)
@@ -1437,6 +1572,7 @@ class VoiceTranslatorApp:
     def _on_close(self):
         """Обработчик закрытия окна."""
         logger.info("Закрытие приложения...")
+        self._is_closing = True
 
         self._stop_dictation()
         self._stop_recording()

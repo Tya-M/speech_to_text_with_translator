@@ -23,6 +23,8 @@ venv_broken_backup/
 # Терминальные логи и дампы
 output-*.txt
 output-*.md
+report-*.txt
+fail.png
 [0-9]*_20*.md
 
 # Локальные аудиосэмплы для проверки распознавания

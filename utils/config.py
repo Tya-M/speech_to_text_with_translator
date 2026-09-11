@@ -8,8 +8,27 @@ from typing import Literal, Optional
 from pathlib import Path
 import json
 import logging
+import math
 
 logger = logging.getLogger("voice_translator.config")
+
+
+def _bounded_int(value, default: int, minimum: int, maximum: int) -> int:
+    try:
+        value = int(value)
+    except (TypeError, ValueError):
+        value = default
+    return max(minimum, min(maximum, value))
+
+
+def _bounded_float(value, default: float, minimum: float, maximum: float) -> float:
+    try:
+        value = float(value)
+    except (TypeError, ValueError):
+        value = default
+    if not math.isfinite(value):
+        value = default
+    return max(minimum, min(maximum, value))
 
 # Определяем путь к конфигу относительно корня проекта
 CONFIG_DIR = Path(__file__).parent.parent
@@ -29,7 +48,7 @@ class AppConfig:
     gigaam_language: str = "ru"
 
     # Параметры аудио
-    sensitivity: int = 1000  # 100-2000
+    sensitivity: int = 1000  # software gain: 100-2000, 1000 is neutral
     vad_threshold: int = 500  # 200-1000
     device_index: int = 0
     device_name: str = ""  # Имя устройства для поиска при загрузке
@@ -58,10 +77,19 @@ class AppConfig:
     
     def __post_init__(self):
         """Валидация значений после инициализации."""
-        self.sensitivity = max(100, min(2000, self.sensitivity))
-        self.vad_threshold = max(200, min(1000, self.vad_threshold))
-        self.font_size = max(10, min(24, self.font_size))
-        self.chunk_duration = max(1.0, min(10.0, self.chunk_duration))
+        self.sensitivity = _bounded_int(self.sensitivity, 1000, 100, 2000)
+        self.vad_threshold = _bounded_int(self.vad_threshold, 500, 200, 1000)
+        self.font_size = _bounded_int(self.font_size, 14, 10, 24)
+        self.chunk_duration = _bounded_float(self.chunk_duration, 3.0, 1.0, 10.0)
+
+        self.device_index = _bounded_int(self.device_index, 0, 0, 4096)
+        self.sample_rate = _bounded_int(self.sample_rate, 16000, 8000, 48000)
+        self.window_width = _bounded_int(self.window_width, 900, 500, 3840)
+        self.window_height = _bounded_int(self.window_height, 450, 400, 2160)
+        self.translation_cache_size = _bounded_int(
+            self.translation_cache_size, 100, 1, 10000
+        )
+        self.device_name = str(self.device_name or "").strip()
 
         allowed_engines = {"gigaam"}
         self.engine = str(self.engine).strip().lower()

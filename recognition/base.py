@@ -68,6 +68,10 @@ class BaseRecognizer(ABC):
             RecognitionResult с partial=True для промежуточных результатов
         """
         pass
+
+    def finalize_stream(self) -> Generator[RecognitionResult, None, None]:
+        """Flushes any pending audio at the end of a recording session."""
+        yield from ()
     
     def reset(self) -> None:
         """Сбрасывает внутреннее состояние (для потокового распознавания)."""

@@ -5,6 +5,8 @@
 import unittest
 from unittest.mock import patch
 
+import numpy as np
+
 from audio.capture import AudioCapture, AudioDevice
 
 
@@ -24,6 +26,11 @@ class _FakeStream:
 
     def close(self) -> None:
         self.closed = True
+
+
+class _InactiveStream(_FakeStream):
+    def is_active(self) -> bool:
+        return False
 
 
 class _FakePyAudio:
@@ -60,3 +67,47 @@ class TestAudioCapture(unittest.TestCase):
                 self.assertEqual(fake_pa.calls, [7, 2])
 
         capture.stop_capture()
+
+    def test_stop_capture_closes_resources_after_worker_failure(self):
+        capture = AudioCapture()
+        stream = _FakeStream()
+        capture._stream = stream
+        capture._is_capturing = False
+
+        capture.stop_capture()
+
+        self.assertTrue(stream.stopped)
+        self.assertTrue(stream.closed)
+
+    def test_inactive_stream_marks_capture_stopped(self):
+        capture = AudioCapture()
+        capture._stream = _InactiveStream()
+        capture._is_capturing = True
+        failures = []
+        capture.set_error_callback(failures.append)
+
+        # _capture_loop is normally started by start_capture; this assertion
+        # focuses on the failure-state transition after an inactive stream.
+        capture._capture_thread = type("Thread", (), {
+            "stopped": lambda self: False,
+        })()
+        capture._capture_loop()
+
+        self.assertFalse(capture.is_capturing)
+        self.assertEqual(failures, ["Аудиопоток стал неактивен"])
+
+    def test_sensitivity_applies_clipped_pcm_gain(self):
+        capture = AudioCapture(sensitivity=2000)
+        samples = np.array([10000, -20000, 20000], dtype=np.int16)
+
+        amplified = np.frombuffer(capture._apply_sensitivity(samples.tobytes()), dtype=np.int16)
+
+        np.testing.assert_array_equal(amplified, [20000, -32768, 32767])
+
+    def test_audio_constructor_normalizes_native_parameters(self):
+        capture = AudioCapture(sample_rate=0, chunk_size=1, device_index=-4, sensitivity="bad")
+
+        self.assertEqual(capture.sample_rate, AudioCapture.DEFAULT_RATE)
+        self.assertEqual(capture.chunk_size, AudioCapture.CHUNK_SIZE)
+        self.assertIsNone(capture.device_index)
+        self.assertEqual(capture.sensitivity, 1000)

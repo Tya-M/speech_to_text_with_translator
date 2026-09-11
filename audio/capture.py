@@ -44,11 +44,27 @@ class AudioCapture:
         self,
         sample_rate: int = DEFAULT_RATE,
         chunk_size: int = CHUNK_SIZE,
-        device_index: Optional[int] = None
+        device_index: Optional[int] = None,
+        sensitivity: int = 1000,
     ):
-        self.sample_rate = sample_rate
-        self.chunk_size = chunk_size
-        self.device_index = device_index
+        try:
+            sample_rate = int(sample_rate)
+        except (TypeError, ValueError):
+            sample_rate = self.DEFAULT_RATE
+        self.sample_rate = sample_rate if 8000 <= sample_rate <= 48000 else self.DEFAULT_RATE
+
+        try:
+            chunk_size = int(chunk_size)
+        except (TypeError, ValueError):
+            chunk_size = self.CHUNK_SIZE
+        self.chunk_size = chunk_size if 64 <= chunk_size <= 8192 else self.CHUNK_SIZE
+
+        try:
+            device_index = None if device_index is None else int(device_index)
+        except (TypeError, ValueError):
+            device_index = None
+        self.device_index = device_index if device_index is None or device_index >= 0 else None
+        self.set_sensitivity(sensitivity)
         
         self._pyaudio: Optional[pyaudio.PyAudio] = None
         self._stream: Optional[pyaudio.Stream] = None
@@ -59,6 +75,8 @@ class AudioCapture:
 
         # Callbacks
         self._level_callback: Optional[Callable[[float], None]] = None
+        self._error_callback: Optional[Callable[[str], None]] = None
+        self._failure_reported = False
 
         # Сглаживание уровня для предотвращения мерцания UI
         self._smoothed_level: float = 0.0
@@ -133,6 +151,14 @@ class AudioCapture:
     
     def set_device(self, device_index: int) -> bool:
         """Устанавливает устройство захвата."""
+        try:
+            device_index = int(device_index)
+        except (TypeError, ValueError):
+            logger.warning("Некорректный индекс устройства: %r", device_index)
+            return False
+        if device_index < 0:
+            logger.warning("Индекс устройства не может быть отрицательным: %s", device_index)
+            return False
         with self._lock:
             if self._is_capturing:
                 logger.warning("Нельзя сменить устройство во время записи")
@@ -140,10 +166,24 @@ class AudioCapture:
             self.device_index = device_index
             logger.info(f"Установлено устройство: {device_index}")
             return True
+
+    def set_sensitivity(self, sensitivity: int) -> None:
+        """Sets software microphone gain; 1000 is neutral."""
+        try:
+            sensitivity = int(sensitivity)
+        except (TypeError, ValueError):
+            sensitivity = 1000
+        sensitivity = max(100, min(2000, sensitivity))
+        self.sensitivity = sensitivity
+        self._gain = sensitivity / 1000.0
     
     def set_level_callback(self, callback: Optional[Callable[[float], None]]) -> None:
         """Устанавливает callback для уровня громкости (0.0-1.0)."""
         self._level_callback = callback
+
+    def set_error_callback(self, callback: Optional[Callable[[str], None]]) -> None:
+        """Sets a callback for unrecoverable capture-worker failures."""
+        self._error_callback = callback
     
     def start_capture(self) -> bool:
         """Начинает захват аудио в фоновом потоке."""
@@ -193,6 +233,7 @@ class AudioCapture:
                         target=self._capture_loop,
                         name="AudioCaptureThread"
                     )
+                    self._failure_reported = False
                     self._is_capturing = True
                     self._capture_thread.start()
 
@@ -215,61 +256,100 @@ class AudioCapture:
     def stop_capture(self) -> None:
         """Останавливает захват аудио."""
         with self._lock:
-            if not self._is_capturing:
+            if not self._is_capturing and not self._capture_thread and not self._stream:
                 return
-            
+
             self._is_capturing = False
-            
-            if self._capture_thread:
-                self._capture_thread.stop()
-                self._capture_thread.join(timeout=2.0)
-                self._capture_thread = None
-            
-            if self._stream:
-                try:
-                    self._stream.stop_stream()
-                    self._stream.close()
-                except Exception as e:
-                    logger.warning(f"Ошибка остановки потока: {e}")
-                self._stream = None
-            
-            logger.info("Захват аудио остановлен")
-    
+            capture_thread = self._capture_thread
+            self._capture_thread = None
+            stream = self._stream
+            self._stream = None
+
+        if capture_thread:
+            capture_thread.stop()
+            capture_thread.join(timeout=2.0)
+
+        if stream:
+            try:
+                stream.stop_stream()
+                stream.close()
+            except Exception as e:
+                logger.warning(f"Ошибка остановки потока: {e}")
+
+        logger.info("Захват аудио остановлен")
+
+    def _mark_capture_failed(self, reason: str = "Неизвестная ошибка аудиопотока") -> None:
+        """Помечает захват остановленным after an unrecoverable read error."""
+        # This helper is only called by _capture_loop.  Do not rely on the
+        # thread reference here: tests and shutdown paths may invoke the loop
+        # directly, and the reference can be cleared concurrently by stop().
+        with self._lock:
+            if not self._is_capturing or self._failure_reported:
+                return
+            self._is_capturing = False
+            self._failure_reported = True
+            callback = self._error_callback
+        if callback:
+            try:
+                callback(reason)
+            except Exception:
+                logger.exception("Ошибка callback аудиосбоя")
+
     def _capture_loop(self) -> None:
         """Основной цикл захвата аудио."""
-        while self._is_capturing and self._capture_thread and not self._capture_thread.stopped():
-            try:
-                if self._stream and self._stream.is_active():
-                    data = self._stream.read(self.chunk_size, exception_on_overflow=False)
+        try:
+            while self._is_capturing and self._capture_thread and not self._capture_thread.stopped():
+                try:
+                    if self._stream and self._stream.is_active():
+                        data = self._stream.read(self.chunk_size, exception_on_overflow=False)
+                        data = self._apply_sensitivity(data)
 
-                    # Вычисляем уровень громкости со сглаживанием
-                    if self._level_callback:
-                        audio_array = np.frombuffer(data, dtype=np.int16)
-                        raw_level = np.abs(audio_array).mean() / 32768.0
-                        raw_level = min(1.0, raw_level * 3)  # Усиливаем для визуализации
+                        # Вычисляем уровень громкости со сглаживанием
+                        if self._level_callback:
+                            audio_array = np.frombuffer(data, dtype=np.int16)
+                            raw_level = np.abs(audio_array).mean() / 32768.0
+                            raw_level = min(1.0, raw_level * 3)  # Усиливаем для визуализации
 
-                        # Экспоненциальное сглаживание (EMA)
-                        self._smoothed_level = (
-                            self._smoothing_factor * raw_level +
-                            (1 - self._smoothing_factor) * self._smoothed_level
-                        )
-                        self._level_callback(self._smoothed_level)
+                            # Экспоненциальное сглаживание (EMA)
+                            self._smoothed_level = (
+                                self._smoothing_factor * raw_level +
+                                (1 - self._smoothing_factor) * self._smoothed_level
+                            )
+                            self._level_callback(self._smoothed_level)
 
-                    # Добавляем в очередь
-                    try:
-                        self._audio_queue.put(data, block=False)
-                    except Exception:
-                        pass  # Очередь переполнена, пропускаем chunk
+                        # Добавляем в очередь
+                        try:
+                            self._audio_queue.put(data, block=False)
+                        except Exception:
+                            pass  # Очередь переполнена, пропускаем chunk
+                    else:
+                        # Не допускаем busy-spin при неожиданно неактивном stream.
+                        self._mark_capture_failed("Аудиопоток стал неактивен")
+                        logger.error("Аудиопоток стал неактивен")
+                        break
 
-            except IOError as e:
-                if "Input overflowed" in str(e):
-                    logger.debug("Audio buffer overflow, пропускаем")
-                else:
-                    logger.error(f"Ошибка чтения аудио: {e}")
+                except IOError as e:
+                    if "Input overflowed" in str(e):
+                        logger.debug("Audio buffer overflow, пропускаем")
+                    else:
+                        logger.error(f"Ошибка чтения аудио: {e}")
+                        self._mark_capture_failed(f"Ошибка чтения аудио: {e}")
+                        break
+                except Exception as e:
+                    logger.error(f"Неожиданная ошибка в capture loop: {e}")
+                    self._mark_capture_failed(f"Неожиданная ошибка аудиопотока: {e}")
                     break
-            except Exception as e:
-                logger.error(f"Неожиданная ошибка в capture loop: {e}")
-                break
+        finally:
+            # Не оставляем владельцев записи в состоянии capturing после сбоя.
+            self._mark_capture_failed()
+
+    def _apply_sensitivity(self, data: bytes) -> bytes:
+        """Applies bounded PCM16 gain without wrapping/clipping artifacts."""
+        if self._gain == 1.0 or not data:
+            return data
+        samples = np.frombuffer(data, dtype=np.int16).astype(np.float32)
+        amplified = np.clip(samples * self._gain, -32768, 32767)
+        return amplified.astype(np.int16).tobytes()
     
     def get_audio_chunk(self, timeout: float = 0.1) -> Optional[bytes]:
         """Получает chunk аудио из очереди."""

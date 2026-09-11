@@ -16,8 +16,9 @@ services or third-party APIs.
 - **Translation** of the recognized text.
 - **🎤 Dictation into cursor** — hold a hotkey, speak, and the text is typed
   wherever your cursor is (browser, editor, messenger, etc.).
-- Dictation can use **GigaAM (Russian)** or **Parakeet Unified EN (English)**;
-  Parakeet runs locally through `sherpa-onnx`.
+- Dictation can use **GigaAM (Russian)** or **Parakeet + GigaAM (Russian and
+  English)**; Parakeet runs locally through `sherpa-onnx`, while GigaAM is used
+  automatically for Russian utterances.
 - **Graphical interface** with microphone, sensitivity and VAD-threshold settings,
   plus engine and model selection.
 - Configurable hotkey and dictation mode (hold / toggle).
@@ -64,6 +65,15 @@ pip install "sherpa-onnx==1.13.8" "sherpa-onnx-bin==1.13.8"
 ```
 
 > On first launch, the selected recognition model is downloaded automatically.
+
+### Testing
+
+Install the test dependencies and run the complete test suite with:
+
+```bash
+pip install -r requirements-dev.txt
+python -m pytest
+```
 
 ---
 
@@ -123,9 +133,11 @@ Main parameters:
 |--------------------|---------------------------------------------------------|-----------------|
 | `engine`           | Recognition engine: `gigaam`                            | `"gigaam"`      |
 | `gigaam_model`     | GigaAM model                                            | `"v3_e2e_rnnt"` |
+| `sensitivity`      | Software microphone gain; `1000` means neutral          | `1000`          |
 | `vad_threshold`    | Speech-detection threshold (silence/voice)              | `700`           |
 | `sample_rate`      | Sample rate, Hz                                         | `16000`         |
 | `device_index`     | Microphone index                                        | `7`             |
+| `translation_cache_size` | Translation cache size (minimum `1`)              | `100`           |
 | `dictation_key`    | Dictation hotkey                                        | `"f9"`          |
 | `dictation_mode`   | Mode: `hold` or `toggle`                                | `"hold"`        |
 | `dictation_engine` | Dictation engine: `gigaam` or `parakeet`               | `"gigaam"`      |
@@ -149,7 +161,8 @@ Settings can also be changed directly in the interface — they are saved automa
 ├── main.py            # Entry point: app with the interface
 ├── dictation_main.py  # Entry point: dictation-only mode
 ├── config.json        # Application settings
-└── requirements.txt   # Python dependencies
+├── requirements.txt   # Main Python dependencies
+└── requirements-dev.txt # Test dependencies
 ```
 
 ---
